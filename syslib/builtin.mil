@@ -1,0 +1,21 @@
+// builtin.mil - declarations for C-implemented ("native") methods.
+//
+// These functions have no minilang body; they are implemented in C
+// (see native.c in the boot toolchain) and dispatched by the VM via OP_NATIVE.
+//
+// Usage:
+//   require sqrt from builtin;
+//   println toString(sqrt(144));
+//
+//   // or whole-module:
+//   require builtin;
+//   println toString(builtin.time());
+
+native func sqrt(n);        // floor(sqrt(n)) as int (n<0 -> 0)
+native func abs(n);         // |n|
+native func time();         // seconds since the Unix epoch
+native func clock_ms();     // milliseconds since process start (monotonic)
+native func getenv(name);   // environment variable value ("" if unset)
+native func cwrite(s);      // write a string directly to stdout, returns 1
+native func exit(code);     // terminate the process with exit code
+native func csystem(cmd);    // run a shell command, returns exit code

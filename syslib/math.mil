@@ -60,17 +60,9 @@ func isOdd(n) {
     return n % 2 != 0;
 }
 
-// integer square root (Newton's method)
-func sqrt(n) {
-    if (n < 0) { return 0; }
-    var x = n;
-    var y = (x + 1) / 2;
-    while (y < x) {
-        x = y;
-        y = (x + n / x) / 2;
-    }
-    return x;
-}
+// integer square root is now a C native — see `require sqrt from builtin;`
+// (syslib/builtin.mil, implemented in native.c). Removing the mil Newton loop
+// shrinks the compiled .milc image.
 
 // factorial
 func factorial(n) {

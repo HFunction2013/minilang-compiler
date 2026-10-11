@@ -1,0 +1,20 @@
+// Test native (C-implemented) methods via the builtin module.
+// The declarations live in syslib/builtin.mil; the implementations are in C
+// (native.c, part of the boot toolchain) and dispatched by the VM.
+require sqrt, abs, time, clock_ms from builtin;
+require getenv, cwrite from builtin;
+
+func main() {
+    println toString(sqrt(100));     // 10
+    println toString(sqrt(2));      // 1
+    println toString(sqrt(123456));  // 351
+    println toString(abs(-42));      // 42
+    println toString(time());         // unix seconds (nonzero)
+    println toString(clock_ms());     // ms (nonzero)
+
+    var home = getenv("HOME");
+    println home;                     // prints $HOME (or "")
+
+    cwrite("written via cwrite\n");
+    return 0;
+}
