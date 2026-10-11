@@ -1,25 +1,39 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -O2 -std=gnu11
-SRCS = value.c lexer.c parser.c bytecode.c vm.c llvm_gen.c milc_io.c native.c main.c
-OBJS = $(SRCS:.c=.o)
-TARGET = minilang
+# minilang-compiler
+#
+# Self-hosted minilang toolchain. The handwritten C bootstrap compiler lives in
+# the sibling repository `minilang-boot`; this repo only contains the minilang
+# sources (compiler.mil / vm.mil / llvm_gen.mil / milc_io.mil / main.mil) that
+# the boot binary compiles and runs.
+#
+# Point MINILANG at a boot `minilang` binary (built from minilang-boot), or let
+# the Makefile fall back to ../minilang-boot/minilang then ./minilang.
 
-.PHONY: all clean test
+MINILANG ?= $(or $(MINILANG_BOOT),$(wildcard ../minilang-boot/minilang),./minilang)
 
-all: $(TARGET)
+.PHONY: all test bootstrap clean check-boot
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+all: check-boot
+	@echo "Using boot binary: $(MINILANG)"
+	$(MINILANG) build -b main.mil
+	@echo "Self-hosted CLI: run with '$(MINILANG) run main.mil <command> ...'"
 
-%.o: %.c minilang.h
-	$(CC) $(CFLAGS) -c -o $@ $<
+check-boot:
+	@if [ -z "$(MINILANG)" ] || [ ! -x "$(MINILANG)" ]; then \
+	  echo "Boot compiler not found. Build it first:"; \
+	  echo "  git clone https://github.com/HFunction2013/minilang-boot"; \
+	  echo "  $(MAKE) -C minilang-boot"; \
+	  echo "then: make MINILANG_BOOT=\$$PWD/minilang-boot/minilang"; \
+	  exit 1; \
+	fi
+
+test: check-boot
+	@for f in tests/*.mil; do \
+	  echo "--- $$f"; \
+	  $(MINILANG) run "$$f" || echo "FAILED: $$f"; \
+	done
+
+bootstrap: check-boot
+	./bootstrap_test.sh
 
 clean:
-	rm -f $(OBJS) $(TARGET) *.ll *.o tests/*.ll tests/*.o tests/*_native
-
-test: $(TARGET)
-	@echo "=== Running VM tests ==="
-	@for f in tests/*.mil; do \
-		echo "--- $$f (VM) ---"; \
-		./$(TARGET) run "$$f"; \
-	done
+	rm -f *.milc *.ll *.o

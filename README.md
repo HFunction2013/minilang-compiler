@@ -4,20 +4,27 @@
 
 源文件后缀为 `.mil`，字节码文件后缀为 `.milc`（魔数 `!milc`）。
 
+> **仓库拆分（2026-10）**：手写 C 引导编译器已移到独立仓库
+> [`minilang-boot`](https://github.com/HFunction2013/minilang-boot)；标准库
+> [`syslib`](https://github.com/HFunction2013/minilang-syslib) 作为 git submodule
+> 引入；编辑器语言服务器在 [`minilang-server`](https://github.com/HFunction2013/minilang-server)，
+> 文档在 [`minilang-document`](https://github.com/HFunction2013/minilang-document)。
+> 本仓库只保留自举用的 `.mil` 源码、测试和构建脚本。
+
 ## 特性
 
 - **C-like 语法**：函数、递归、if/else、while、var 声明、数组、字符串
 - **双后端**：
   - 字节码 + 栈式 VM（快速开发、调试）
-  - LLVM IR → 原生可执行文件（高性能）
-- **完整自举**：所有 C 源文件均有对应的 minilang 实现，仅靠最小 boot VM 即可独立运行完整工具链
+  - LLVM IR → 原生可执行文件（高性能，用 LLVM 项目二进制 `llc`+`clang` 链接）
+- **完整自举**：所有 C 源文件（见 minilang-boot）均有对应的 minilang 实现，仅靠最小 boot VM 即可独立运行完整工具链
   - `compiler.mil`：词法分析 + 解析 + 字节码生成（对应 lexer.c/parser.c/bytecode.c）
   - `vm.mil`：纯 mil 栈式虚拟机（对应 vm.c/value.c/runtime.c）
   - `llvm_gen.mil`：LLVM IR 生成器（对应 llvm_gen.c）
   - `milc_io.mil`：字节码序列化（对应 milc_io.c，二进制 `!milc` 格式）
   - `main.mil`：统一 CLI 入口（对应 main.c）
 - **自举编译器**：`compiler.mil` 能编译自身，输出与 C boot 编译器逐字节一致
-- **无外部依赖**：不使用文件、网络等外部交互（除 console I/O）
+- **Native（C）方法**：`native func name(params);` 声明无函数体，由 C（`native.c`，见 minilang-boot）实现，VM 通过 `OP_NATIVE` 分发；声明集中在 `syslib/builtin.mil`
 - **内置函数**：`len`, `charAt`, `substr`, `toString`, `toInt`, `strcmp`, `readAll`, `array`, `argc`, `argv`, `readFile`, `fileExists`, `writeFile`, `system`, `readLine`, `readFileBytes`, `writeFileBytes`, `chr`
 - **模块系统（require）**：从 syslib 或脚本目录加载模块，支持命名空间访问和选择性导入
 - **REPL**：交互式命令行，支持多行输入、表达式求值、跨行保留函数/变量/模块
@@ -25,21 +32,25 @@
 
 ## 构建
 
-```bash
-make
-```
+本仓库不再包含 C 源码。先构建 boot 引导编译器：
 
-生成 `minilang` 可执行文件（C 实现的 boot 编译器 + VM）。
+```bash
+git clone https://github.com/HFunction2013/minilang-boot
+$(MAKE) -C minilang-boot        # 产出 minilang-boot/minilang
+git clone https://github.com/HFunction2013/minilang-compiler
+cd minilang-compiler
+git submodule update --init    # 拉取 syslib/
+make MINILANG_BOOT=$PWD/../minilang-boot/minilang
+```
 
 ### LLVM 后端依赖
 
-LLVM 后端使用 Python 的 `llvmlite` 包将 IR 编译为目标文件：
+原生可执行文件链接直接使用 **LLVM 项目二进制**（不再依赖 Python llvmlite）：
 
-```bash
-pip install -r requirements.txt
-```
+- `llc`：把 `.ll` 汇编成目标文件
+- `clang`（或 `ld.lld`，可用 `LLVM_LINKER` 覆盖）：链接目标文件与 `runtime.c`
 
-系统 `gcc` 用于最终链接。
+把 LLVM 安装路径放进 `LLVM_DIR`（自动找 `$LLVM_DIR/bin/llc`、`clang`），或直接让 `llc`/`clang` 在 `PATH` 上。
 
 ## CLI 用法
 
