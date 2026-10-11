@@ -77,6 +77,7 @@ static TokenType keyword_or_ident(const char *word) {
     if (strcmp(word, "require") == 0) return TOK_REQUIRE;
     if (strcmp(word, "from") == 0) return TOK_FROM;
     if (strcmp(word, "in") == 0) return TOK_IN;
+    if (strcmp(word, "native") == 0) return TOK_NATIVE;
     return TOK_IDENT;
 }
 

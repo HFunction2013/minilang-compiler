@@ -391,7 +391,7 @@ static Node *parse_stmt(Parser *p) {
     n->expr_stmt.expr = e; return n;
 }
 
-static Node *parse_func(Parser *p) {
+static Node *parse_func(Parser *p, int is_native) {
     Token *t = expect(p, TOK_FUNC, "'func'");
     Token *name = expect(p, TOK_IDENT, "function name");
     expect(p, TOK_LPAREN, "'('");
@@ -406,11 +406,19 @@ static Node *parse_func(Parser *p) {
         }
     }
     expect(p, TOK_RPAREN, "')'");
-    Node *body = parse_block(p);
+    Node *body;
+    if (is_native) {
+        // `native func name(params);` — no body, implemented in C.
+        expect(p, TOK_SEMICOLON, "';' after native function declaration");
+        body = NULL;
+    } else {
+        body = parse_block(p);
+    }
     Node *n = node_new(NODE_FUNC, t->line);
     n->func.name = strdup(name->text);
     n->func.params = params; n->func.param_count = pcount;
-    n->func.body = body; return n;
+    n->func.body = body; n->func.is_native = is_native;
+    return n;
 }
 
 /* ===================== require module system ===================== */
@@ -700,8 +708,16 @@ void parse(Parser *p) {
     while (!check(p, TOK_EOF)) {
         if (check(p, TOK_REQUIRE)) {
             parse_require(p);
+        } else if (check(p, TOK_NATIVE)) {
+            advance_p(p); // consume 'native'
+            Node *f = parse_func(p, 1);
+            if (p->func_count >= p->func_cap) {
+                p->func_cap = p->func_cap ? p->func_cap*2 : 8;
+                p->funcs = realloc(p->funcs, sizeof(Node*)*p->func_cap);
+            }
+            p->funcs[p->func_count++] = f;
         } else if (check(p, TOK_FUNC)) {
-            Node *f = parse_func(p);
+            Node *f = parse_func(p, 0);
             if (p->func_count >= p->func_cap) {
                 p->func_cap = p->func_cap ? p->func_cap*2 : 8;
                 p->funcs = realloc(p->funcs, sizeof(Node*)*p->func_cap);

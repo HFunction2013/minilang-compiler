@@ -265,6 +265,7 @@ static void dump_bytecode(Program *prog) {
             case OP_READFILEBYTES: name="READFILEBYTES"; break;
             case OP_WRITEFILEBYTES: name="WRITEFILEBYTES"; break;
             case OP_CHR: name="CHR"; break;
+            case OP_NATIVE: name="NATIVE"; break;
         }
         printf("  %4d: %-12s %6d %6d\n", i/3, name, op1, op2);
     }
@@ -524,6 +525,8 @@ static void self_test(void) {
 }
 int main(int argc, char **argv) {
     if (argc > 0 && argv[0]) { snprintf(g_argv0, sizeof(g_argv0), "%s", argv[0]); }
+    /* Register C-implemented native methods (sqrt, abs, time, getenv, ...). */
+    ml_native_register_builtins();
     if (argc < 2) usage(argv[0]);
     const char *cmd = argv[1];
     if (strcmp(cmd, "repl") == 0) {

@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -O2 -std=gnu11
-SRCS = value.c lexer.c parser.c bytecode.c vm.c llvm_gen.c milc_io.c main.c
+SRCS = value.c lexer.c parser.c bytecode.c vm.c llvm_gen.c milc_io.c native.c main.c
 OBJS = $(SRCS:.c=.o)
 TARGET = minilang
 

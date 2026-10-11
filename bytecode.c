@@ -409,7 +409,12 @@ static void compile_expr(Compiler *c, Node *n) {
             }
             for (int i = 0; i < n->call.arg_count; i++)
                 compile_expr(c, n->call.args[i]);
-            bc_emit(c->prog, OP_CALL, fi, n->call.arg_count);
+            if (c->prog->funcs[fi].is_native) {
+                // Native (C-implemented) function: dispatch via VM registry.
+                bc_emit(c->prog, OP_NATIVE, fi, n->call.arg_count);
+            } else {
+                bc_emit(c->prog, OP_CALL, fi, n->call.arg_count);
+            }
             break;
         }
         case NODE_INDEX: {
@@ -461,6 +466,11 @@ Program *compile_to_bytecode(Parser *p) {
     for (int i = 0; i < p->func_count; i++) {
         Node *f = p->funcs[i];
         program_add_func(c.prog, f->func.name, 0, f->func.param_count);
+        if (f->func.is_native) {
+            // Native functions have no bytecode body; the VM dispatches to C.
+            c.prog->funcs[i].is_native = 1;
+            c.prog->funcs[i].address = -1;
+        }
     }
 
     int main_idx = find_func(&c, "main");
@@ -480,6 +490,13 @@ Program *compile_to_bytecode(Parser *p) {
         c.var_count = 0;
         c.var_cap = 0;
         c.current_func = i;
+
+        if (f->func.is_native) {
+            // No body; nothing to emit. locals = param_count (declared but unused).
+            c.prog->funcs[i].local_count = f->func.param_count;
+            free(c.var_names);
+            continue;
+        }
 
         c.prog->funcs[i].address = c.prog->bc.count / 3;
 

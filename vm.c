@@ -291,6 +291,21 @@ Value vm_run(VM *vm) {
                 push(vm, make_string(buf));
                 break;
             }
+            case OP_NATIVE: {
+                // Pop arguments (args[0] is the first argument), then call the
+                // registered C function under this func's name.
+                Value args[256];
+                for (int i = op2 - 1; i >= 0; i--) args[i] = pop(vm);
+                const char *name = prog->funcs[op1].name;
+                NativeFn fn = ml_native_lookup(name);
+                if (!fn) {
+                    fprintf(stderr, "VM error: native function '%s' is not registered\n", name);
+                    exit(1);
+                }
+                Value ret = fn(vm, args, op2);
+                push(vm, ret);
+                break;
+            }
             case OP_WRITEFILEBYTES: {
                 // Write an int array as raw bytes: pop array, pop path
                 Value arrv = pop(vm);

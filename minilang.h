@@ -72,6 +72,7 @@ typedef enum {
     TOK_VAR, TOK_FUNC, TOK_IF, TOK_ELSE, TOK_WHILE,
     TOK_RETURN, TOK_PRINT, TOK_PRINTLN, TOK_BREAK,
     TOK_REQUIRE, TOK_FROM, TOK_IN,
+    TOK_NATIVE,
     // operators
     TOK_PLUS, TOK_MINUS, TOK_STAR, TOK_SLASH, TOK_PERCENT,
     TOK_EQ, TOK_EQEQ, TOK_NEQ, TOK_LT, TOK_GT, TOK_LTE, TOK_GTE,
@@ -145,7 +146,7 @@ struct Node {
         struct { Node *cond; Node *then_branch; Node *else_branch; } if_stmt;
         struct { Node *cond; Node *body; } while_stmt;
         struct { Node *value; } return_stmt;
-        struct { char *name; char **params; int param_count; Node *body; } func;
+        struct { char *name; char **params; int param_count; Node *body; int is_native; } func;
         struct { char *name; Node **args; int arg_count; } call;
         struct { Node *array; Node *index; } index;
         struct { Node *value; int newline; } print;
@@ -229,6 +230,7 @@ typedef enum {
     OP_READFILEBYTES, // pop path, push file contents as int array (one int per byte)
     OP_WRITEFILEBYTES,// pop byte array, pop path, write raw bytes, push 1 on success
     OP_CHR,           // pop int, push 1-char string of that byte value
+    OP_NATIVE,        // op1: native func index (into funcs[], is_native), op2: arg count
 } OpCode;
 
 typedef struct {
@@ -239,9 +241,10 @@ typedef struct {
 
 typedef struct {
     char *name;
-    int address;   // instruction index
+    int address;   // instruction index; -1 for native (C-implemented) functions
     int param_count;
     int local_count;
+    int is_native; // 1: implemented in C via the native registry, not bytecode
 } FuncInfo;
 
 typedef struct {
@@ -298,6 +301,19 @@ VM *vm_new(Program *prog);
 void vm_free(VM *vm);
 void vm_set_args(VM *vm, int argc, char **argv);
 Value vm_run(VM *vm);
+
+/* ===================== Native (C) method registry ===================== */
+/* A native method is a C function callable from minilang. Arguments are
+   popped onto `args` (args[0] is the first argument), `argc` is the count.
+   Return value is pushed back onto the minilang stack. */
+typedef Value (*NativeFn)(VM *vm, Value *args, int argc);
+
+/* Register a C native method under `name`. Overwrites any previous entry. */
+void ml_native_register(const char *name, NativeFn fn);
+/* Look up a native method by name; returns NULL if not registered. */
+NativeFn ml_native_lookup(const char *name);
+/* Ensure the built-in native method table (syslib natives) is registered. */
+void ml_native_register_builtins(void);
 
 /* ===================== LLVM IR Gen ===================== */
 char *generate_llvm_ir(Parser *p);
