@@ -19,7 +19,7 @@ func print_usage() {
     println "  dump-text <file>     Text bytecode for .mil, or read a .milc bytecode file";
     println "  llvm <file>          Compile to LLVM IR";
     println "  repl                 Start interactive REPL";
-    println "  self-test            Run self-hosting verification";
+    println "  self-test [file]   Run self-hosting verification (compiler.mil, default cwd)";
     println "  build [opts] <file>  Build native executable or bytecode";
     println "    -b, --bytecode     write binary .milc (magic \"!milc\")";
     println "    -e, --executable   write native executable (default)";
@@ -385,14 +385,16 @@ func cmd_bytecode(n) {
     return 0;
 }
 // cmd self-test: compile compiler.mil with the mil compiler and dump its bytecode
-func cmd_self_test() {
+func cmd_self_test(n) {
+    var file = "compiler.mil";
+    if (n > 2) { file = argv(2); }
     println "=== Self-hosting test ===";
-    var src = readFile("compiler.mil");
-    var state = parse_source("compiler.mil", src);
+    var src = readFile(file);
+    var state = parse_source(file, src);
     compiler.compile_program(state);
     var bc = compiler.output_bytecode(state);
     print bc;
-    println "(mil self-test: compiler.mil bytecode dumped above)";
+    println "(mil self-test: " + file + " bytecode dumped above)";
     return 0;
 }
 // cmd repl: interactive REPL (matches boot repl)
@@ -476,7 +478,7 @@ func main() {
     } else if (strcmp(cmd, "bytecode") == 0) {
         return cmd_bytecode(n);
     } else if (strcmp(cmd, "self-test") == 0) {
-        return cmd_self_test();
+        return cmd_self_test(n);
     } else if (strcmp(cmd, "repl") == 0) {
         return cmd_repl();
     } else if (strcmp(cmd, "dump-text") == 0) {

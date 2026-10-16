@@ -14,8 +14,12 @@ MINILANG ?= $(or $(MINILANG_BOOT),$(wildcard ../minilang-boot/minilang),./minila
 
 all: check-boot
 	@echo "Using boot binary: $(MINILANG)"
+	@if [ "$(MINILANG)" != "./minilang" ]; then \
+	  echo "Creating ./minilang symlink -> $(MINILANG)"; \
+	  ln -sf "$(MINILANG)" minilang; \
+	fi
 	$(MINILANG) build -b main.mil
-	@echo "Self-hosted CLI: run with '$(MINILANG) run main.mil <command> ...'"
+	@echo "Self-hosted CLI: run with './minilang run main.mil <command> ...'"
 
 check-boot:
 	@if [ -z "$(MINILANG)" ] || [ ! -x "$(MINILANG)" ]; then \
@@ -36,4 +40,4 @@ bootstrap: check-boot
 	./bootstrap_test.sh
 
 clean:
-	rm -f *.milc *.ll *.o
+	rm -f *.milc *.ll *.o minilang

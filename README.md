@@ -43,6 +43,11 @@ git submodule update --init    # 拉取 syslib/
 make MINILANG_BOOT=$PWD/../minilang-boot/minilang
 ```
 
+`make` 会在本仓库内创建指向 boot 二进制的 `./minilang` 软链接
+（已被 `.gitignore` 忽略，不会入库），因此下文 CLI 示例中的 `./minilang`
+可直接使用；若 boot 二进制不在 `../minilang-boot/minilang`，请设置
+`MINILANG_BOOT`，或自行把二进制复制/链接为 `./minilang`。
+
 ### LLVM 后端依赖
 
 原生可执行文件链接直接使用 **LLVM 项目二进制**（不再依赖 Python llvmlite）：
