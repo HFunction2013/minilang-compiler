@@ -661,8 +661,11 @@ func generate_ir(state) {
                 gi2 = gi2 + 1;
             }
         }
-        // Compile body
-        compile_stmt(f[4]);
+        // Compile body (native functions have no body: body == -1, matching the
+        // C IR generator's `if (!n) return` — empty body, just params + ret nil)
+        if (f[4] != -1) {
+            compile_stmt(f[4]);
+        }
         // Implicit ret nil
         ir_emit("  ret %Value { i64 0, i64 0 }\n");
         // Insert allocas after "entry:\n"

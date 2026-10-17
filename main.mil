@@ -219,18 +219,21 @@ func cmd_build_executable(file) {
         return 1;
     }
     var tdir = get_toolchain_dir();
-    // Compile IR to object file
-    var cmd = "python3 " + tdir + "ir_compile.py " + llpath + " " + opath;
+    // Locate runtime.c: alongside the executable first, then the sibling
+    // minilang-boot repo (it moved there in the 2026-10 toolchain split).
+    var rtc = tdir + "runtime.c";
+    if (fileExists(rtc) != 1) {
+        rtc = tdir + "../minilang-boot/runtime.c";
+        if (fileExists(rtc) != 1) {
+            rtc = "../minilang-boot/runtime.c";
+        }
+    }
+    // Compile IR to object file and link with runtime.c (ir_compile.py drives
+    // $LLVM_DIR/bin/llc + clang, or PATH — matching the C boot toolchain).
+    var cmd = "python3 " + tdir + "ir_compile.py " + llpath + " " + opath + " " + rtc + " " + binpath;
     var rc = system(cmd);
     if (rc != 0) {
         println "IR compilation failed";
-        return 1;
-    }
-    // Link with runtime.c
-    cmd = "gcc -o " + binpath + " " + opath + " " + tdir + "runtime.c -O2 2>&1";
-    rc = system(cmd);
-    if (rc != 0) {
-        println "Link failed";
         return 1;
     }
     println "Executable built: " + binpath;

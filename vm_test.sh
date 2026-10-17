@@ -53,8 +53,8 @@ echo ""
 echo "=== 3. mil VM runtime matches boot VM ==="
 for f in tests/*.mil; do
     "$MINILANG" dump-text "$f" > /tmp/minilang_test.bc 2>/dev/null
-    boot_out=$("$MINILANG" run "$f" 2>&1)
-    mil_out=$("$MINILANG" run vm.mil /tmp/minilang_test.bc 2>&1)
+    boot_out=$("$MINILANG" run "$f" 2>&1 | sed -E 's/^[0-9]{7,}$/TIME/')
+    mil_out=$("$MINILANG" run vm.mil /tmp/minilang_test.bc 2>&1 | sed -E 's/^[0-9]{7,}$/TIME/')
     check "$boot_out" "$mil_out" "$f"
 done
 echo ""

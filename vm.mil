@@ -54,6 +54,20 @@ var OP_READLINE = 47;
 var OP_READFILEBYTES = 48;
 var OP_WRITEFILEBYTES = 49;
 var OP_CHR = 50;
+var OP_NATIVE = 51;
+// ===== Native (C-implemented) methods =====
+// Declared here so this pure-mil VM can dispatch OP_NATIVE to the host VM's
+// native registry (the C implementations in the boot toolchain). Module-
+// qualified names in the running program (e.g. "builtin.sqrt") fall back to
+// the bare name, matching ml_native_lookup in the C VM.
+native func sqrt(n);
+native func abs(n);
+native func time();
+native func clock_ms();
+native func getenv(name);
+native func cwrite(s);
+native func exit(code);
+native func csystem(cmd);
 // ===== Value types =====
 var VAL_NIL = 0;
 var VAL_INT = 1;
@@ -641,6 +655,16 @@ func run_vm() {
         } else if (op == OP_CHR) {
             var cval = pop();
             push(v_str(chr(cval[1])));
+        } else if (op == OP_NATIVE) {
+            // Pop arguments (args[0] is the first argument), then dispatch to
+            // the host native registry by the function's base name.
+            var args = array(256, 0);
+            var ai = op2 - 1;
+            while (ai >= 0) {
+                args[ai] = pop();
+                ai = ai - 1;
+            }
+            push(call_native(g_func_names[op1], args, op2));
         } else {
             print "VM error: unknown opcode ";
             println toString(op);
@@ -649,6 +673,35 @@ func run_vm() {
     }
 }
 // ===== Main =====
+// Base name of a (possibly module-qualified) native function name.
+func native_base_name(name) {
+    var i = len(name) - 1;
+    while (i >= 0) {
+        if (charAt(name, i) == 46) {
+            return substr(name, i + 1, len(name) - i - 1);
+        }
+        i = i - 1;
+    }
+    return name;
+}
+// Dispatch an OP_NATIVE call to the host native registry. Returns the pushed
+// Value. Matches the C VM: ml_native_lookup(name), with the module-qualified
+// name falling back to the bare name.
+func call_native(fname, args, argc) {
+    var base = native_base_name(fname);
+    if (strcmp(base, "sqrt") == 0) { return v_int(sqrt(args[0][1])); }
+    if (strcmp(base, "abs") == 0) { return v_int(abs(args[0][1])); }
+    if (strcmp(base, "time") == 0) { return v_int(time()); }
+    if (strcmp(base, "clock_ms") == 0) { return v_int(clock_ms()); }
+    if (strcmp(base, "getenv") == 0) { return v_str(getenv(args[0][1])); }
+    if (strcmp(base, "cwrite") == 0) { cwrite(args[0][1]); return v_int(1); }
+    if (strcmp(base, "exit") == 0) { exit(args[0][1]); return v_nil(); }
+    if (strcmp(base, "csystem") == 0) { return v_int(csystem(args[0][1])); }
+    print "VM error: native function '";
+    print fname;
+    println "' is not registered";
+    return v_nil();
+}
 // Load a program already decoded from a binary .milc file (see milc_io.decode_bytes)
 func load_program(prog) {
     g_const_count = prog[0];

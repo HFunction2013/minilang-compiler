@@ -115,6 +115,7 @@ var OP_READLINE = 47;
 var OP_READFILEBYTES = 48;
 var OP_WRITEFILEBYTES = 49;
 var OP_CHR = 50;
+var OP_NATIVE = 51;
 // ===== State layout =====
 // 0=src, 1=pos, 2=line, 3=tokens, 4=tok_count
 // 5=parse_pos, 6=constants, 7=const_count, 8=funcs, 9=func_count
@@ -644,7 +645,13 @@ func parse_block(state) {
     var count = 0;
     var first = 1;
     while (tok_type(state) != TOK_RBRACE && tok_type(state) != TOK_EOF) {
+        var before = state[5];
         var s = parse_stmt(state);
+        if (state[5] == before) {
+            // parse_stmt hit an unexpected token and made no progress: advance
+            // so error recovery cannot spin forever (was an infinite loop).
+            advance_tok(state);
+        }
         if (first) {
             stmts = [s];
             first = 0;
@@ -744,7 +751,7 @@ func parse_stmt(state) {
     expect_tok(state, TOK_SEMICOLON, "';'");
     return [NODE_EXPR_STMT, e];
 }
-func parse_func(state) {
+func parse_func(state, is_native) {
     expect_tok(state, TOK_FUNC, "'func'");
     var name_tok = expect_tok(state, TOK_IDENT, "function name");
     expect_tok(state, TOK_LPAREN, "'('");
@@ -769,7 +776,15 @@ func parse_func(state) {
         }
     }
     expect_tok(state, TOK_RPAREN, "')'");
-    var body = parse_block(state);
+    var body = 0;
+    if (is_native) {
+        // `native func name(params);` — no body, implemented in C (native.c).
+        // Marked with body = -1 so the code generator emits OP_NATIVE.
+        expect_tok(state, TOK_SEMICOLON, "';' after native function declaration");
+        body = -1;
+    } else {
+        body = parse_block(state);
+    }
     return [NODE_FUNC, name_tok[2], pcount, params, body];
 }
 // ===== Module system =====
@@ -796,9 +811,11 @@ func add_alias(state, name, target) {
 }
 // Recursively rename NODE_CALL names inside a module's AST
 func rename_module_refs(node, prefix) {
+    if (node == -1) { return; } // native function body marker: nothing to rename
     var typ = node[0];
     if (typ == NODE_FUNC) {
-        rename_module_refs(node[4], prefix);
+        // Native functions have no body (body == -1) to rename.
+        if (node[4] != -1) { rename_module_refs(node[4], prefix); }
     } else if (typ == NODE_VAR_DECL) {
         rename_module_refs(node[2], prefix);
     } else if (typ == NODE_ASSIGN) {
@@ -1056,8 +1073,15 @@ func parse_program(state) {
     while (tok_type(state) != TOK_EOF) {
         if (tok_type(state) == TOK_REQUIRE) {
             parse_require(state);
+        } else if (tok_type(state) == TOK_IDENT && strcmp(tok_str(state), "native") == 0) {
+            // native func name(params); — C-implemented, no body (matches boot TOK_NATIVE)
+            advance_tok(state); // consume 'native'
+            var f = parse_func(state, 1);
+            var fidx = state[9];
+            state[8][fidx] = f;
+            state[9] = fidx + 1;
         } else if (tok_type(state) == TOK_FUNC) {
-            var f = parse_func(state);
+            var f = parse_func(state, 0);
             var fidx = state[9];
             state[8][fidx] = f;
             state[9] = fidx + 1;
@@ -1361,7 +1385,17 @@ func compile_expr(state, node) {
                 compile_expr(state, node[3][i]);
                 i = i + 1;
             }
-            emit(state, OP_CALL, fi, node[2]);
+            // Native (C-implemented) functions dispatch via the host registry
+            // (matching C: OP_NATIVE with the func index, not a bytecode body).
+            var is_native_fn = 0;
+            if (fi >= 0) {
+                if (state[8][fi][4] == -1) { is_native_fn = 1; }
+            }
+            if (is_native_fn == 1) {
+                emit(state, OP_NATIVE, fi, node[2]);
+            } else {
+                emit(state, OP_CALL, fi, node[2]);
+            }
         }
     } else if (typ == NODE_INDEX) {
         compile_expr(state, node[1]);
@@ -1402,21 +1436,28 @@ func compile_program(state) {
         var f = state[8][i];
         func_names[i] = f[1];
         func_params[i] = f[2];
-        state[12] = array(256, 0);
-        state[13] = 0;
-        state[14] = i;
-        func_addrs[i] = bc_count(state);
-        // Parameters as locals
-        var j = 0;
-        while (j < f[2]) {
-            add_var(state, f[3][j]);
-            j = j + 1;
+        if (f[4] == -1) {
+            // Native function: no bytecode body, dispatched via the host's
+            // native registry. address = -1, locals = param_count (matches C).
+            func_addrs[i] = -1;
+            func_locals[i] = f[2];
+        } else {
+            state[12] = array(256, 0);
+            state[13] = 0;
+            state[14] = i;
+            func_addrs[i] = bc_count(state);
+            // Parameters as locals
+            var j = 0;
+            while (j < f[2]) {
+                add_var(state, f[3][j]);
+                j = j + 1;
+            }
+            compile_stmt(state, f[4]);
+            // Implicit return (matching C: OP_NIL + OP_RET)
+            emit(state, OP_NIL, 0, 0);
+            emit(state, OP_RET, 0, 0);
+            func_locals[i] = state[13];
         }
-        compile_stmt(state, f[4]);
-        // Implicit return (matching C: OP_NIL + OP_RET)
-        emit(state, OP_NIL, 0, 0);
-        emit(state, OP_RET, 0, 0);
-        func_locals[i] = state[13];
         i = i + 1;
     }
     // Global initialization section
