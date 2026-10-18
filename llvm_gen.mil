@@ -518,7 +518,23 @@ func compile_expr(node) {
             i = i + 1;
         }
         var r = new_temp();
-        var call_str = "  " + r + " = call %Value @user_" + cname + "(";
+        // Determine callee: native functions (body == -1) are C-implemented as
+        // @ml_native_<basename> (base-name fallback matches ml_native_lookup).
+        var callee = "@user_" + cname;
+        if (fi >= 0) {
+            if (g_func_names_ref[fi][4] == -1) {
+                var base = cname;
+                var dpos = len(cname) - 1;
+                while (dpos >= 0) {
+                    if (charAt(cname, dpos) == 46) {
+                        base = substr(cname, dpos + 1, len(cname) - dpos - 1);
+                        dpos = -1;
+                    } else { dpos = dpos - 1; }
+                }
+                callee = "@ml_native_" + base;
+            }
+        }
+        var call_str = "  " + r + " = call %Value " + callee + "(";
         i = 0;
         while (i < argc) {
             if (i > 0) { call_str = call_str + ", "; }
@@ -611,7 +627,18 @@ func generate_ir(state) {
     ir_emit("declare %Value @ml_tostring(%Value)\n");
     ir_emit("declare %Value @ml_toint(%Value)\n");
     ir_emit("declare %Value @ml_strcmp(%Value, %Value)\n");
-    ir_emit("declare %Value @ml_readall()\n\n");
+    ir_emit("declare %Value @ml_readall()\n");
+    // Native (C-implemented) functions — the backend redirects calls to
+    // `native func` declarations to these @ml_native_* symbols by base name,
+    // matching the boot VM's ml_native_lookup base-name fallback.
+    ir_emit("declare %Value @ml_native_sqrt(%Value)\n");
+    ir_emit("declare %Value @ml_native_abs(%Value)\n");
+    ir_emit("declare %Value @ml_native_time()\n");
+    ir_emit("declare %Value @ml_native_clock_ms()\n");
+    ir_emit("declare %Value @ml_native_getenv(%Value)\n");
+    ir_emit("declare %Value @ml_native_cwrite(%Value)\n");
+    ir_emit("declare %Value @ml_native_exit(%Value)\n");
+    ir_emit("declare %Value @ml_native_csystem(%Value)\n\n");
     // Register top-level global variables
     var gi = 0;
     while (gi < g_global_count_ref) {
@@ -629,6 +656,9 @@ func generate_ir(state) {
         var f = state[8][fi];
         var fname = f[1];
         var param_count = f[2];
+        // Native functions (body == -1) are implemented in C as @ml_native_*;
+        // skip the `define` — they are declared above and calls are redirected.
+        if (f[4] != -1) {
         // Reset per-function state
         g_var_count = 0;
         g_alloca_buf = "";
@@ -661,11 +691,8 @@ func generate_ir(state) {
                 gi2 = gi2 + 1;
             }
         }
-        // Compile body (native functions have no body: body == -1, matching the
-        // C IR generator's `if (!n) return` — empty body, just params + ret nil)
-        if (f[4] != -1) {
-            compile_stmt(f[4]);
-        }
+        // Compile body
+        compile_stmt(f[4]);
         // Implicit ret nil
         ir_emit("  ret %Value { i64 0, i64 0 }\n");
         // Insert allocas after "entry:\n"
@@ -689,6 +716,7 @@ func generate_ir(state) {
             g_ir_chunk_count = g_ir_chunk_count + 1;
         }
         ir_emit("}\n\n");
+        } // end if (f[4] != -1)
         fi = fi + 1;
     }
     // main function (C entry)
