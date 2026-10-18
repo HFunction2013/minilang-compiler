@@ -30,16 +30,42 @@ func is_bytecode_text(src) {
 }
 // syslib ships next to main.mil. Work out where that is from our own path, so
 // that `main.mil run sub/x.mil` finds it from any working directory. Falls back
-// to the cwd-relative "syslib" when it cannot be determined.
+// to cwd-relative and parent-relative "syslib" when it cannot be determined,
+// and always verifies the candidate actually contains a known syslib file so
+// we never silently point at an empty directory (e.g. an uninitialized
+// submodule). The first match wins.
 var g_syslib_dir = "syslib";
 func find_syslib_dir() {
+    var cands = array(8, "");
+    var ccount = 0;
+    // 1. Directory of the running binary/script + "/syslib". For a native
+    //    executable invoked as "./main" this is "." (skipped); for an absolute
+    //    path or a script in another directory it gives an absolute syslib.
     if (argc() > 0) {
         var d = compiler.dirname(argv(0));
         if (d != ".") {
-            var cand = d + "/syslib";
-            if (fileExists(cand + "/math.mil") == 1) { return cand; }
+            cands[ccount] = d + "/syslib";
+            ccount = ccount + 1;
         }
     }
+    // 2. cwd-relative (the common case: running from the repo root).
+    cands[ccount] = "syslib";
+    ccount = ccount + 1;
+    // 3. Parent and grandparent (running from tests/ or a subdirectory).
+    cands[ccount] = "../syslib";
+    ccount = ccount + 1;
+    cands[ccount] = "../../syslib";
+    ccount = ccount + 1;
+    // Return the first candidate that actually holds a known syslib module.
+    var i = 0;
+    while (i < ccount) {
+        if (fileExists(cands[i] + "/math.mil") == 1) {
+            return cands[i];
+        }
+        i = i + 1;
+    }
+    // Nothing found: keep "syslib" so the compiler reports a clear
+    // "cannot find module" error rather than silently using a wrong path.
     return "syslib";
 }
 func parse_source(file, src) {
@@ -48,10 +74,14 @@ func parse_source(file, src) {
     state[29] = g_syslib_dir;
     compiler.lex_source(state);
     compiler.parse_program(state);
+    if (state[30] == 1) {
+        println "Parse failed — aborting (fix the errors above and retry).";
+    }
     return state;
 }
 func compile_to_bytecode(file, src) {
     var state = parse_source(file, src);
+    if (state[30] == 1) { return ""; }
     compiler.compile_program(state);
     return compiler.output_bytecode(state);
 }
@@ -116,6 +146,7 @@ func cmd_run(n) {
     } else {
         bc_text = compile_to_bytecode(file, src);
     }
+    if (len(bc_text) == 0) { return 1; }
     vm.run_bytecode(bc_text);
     return 0;
 }

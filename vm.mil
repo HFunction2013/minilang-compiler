@@ -513,22 +513,32 @@ func run_vm() {
                 args[ai] = pop();
                 ai = ai - 1;
             }
-            // Save frame
-            g_call_ret[g_call_depth] = g_ip;
-            g_call_old_locals[g_call_depth] = g_locals;
-            g_call_depth = g_call_depth + 1;
-            // Allocate new locals
-            var nlocals = g_func_locals[op1];
-            var local_size = nlocals;
-            if (local_size < 1) { local_size = 1; }
-            var new_locals = array(local_size, v_nil());
-            var j = 0;
-            while (j < op2 && j < nlocals) {
-                new_locals[j] = args[j];
-                j = j + 1;
+            // Bounds check: an undefined function (e.g. from a failed
+            // require/module load) gets index -1. Report it and push nil
+            // instead of crashing with "array index -1 out of bounds".
+            if (op1 < 0 || op1 >= g_func_count) {
+                print "VM error: call to undefined function (index ";
+                print toString(op1);
+                println ")";
+                push(v_nil());
+            } else {
+                // Save frame
+                g_call_ret[g_call_depth] = g_ip;
+                g_call_old_locals[g_call_depth] = g_locals;
+                g_call_depth = g_call_depth + 1;
+                // Allocate new locals
+                var nlocals = g_func_locals[op1];
+                var local_size = nlocals;
+                if (local_size < 1) { local_size = 1; }
+                var new_locals = array(local_size, v_nil());
+                var j = 0;
+                while (j < op2 && j < nlocals) {
+                    new_locals[j] = args[j];
+                    j = j + 1;
+                }
+                g_locals = new_locals;
+                g_ip = g_func_addrs[op1];
             }
-            g_locals = new_locals;
-            g_ip = g_func_addrs[op1];
         } else if (op == OP_RET) {
             var ret_val = pop();
             g_call_depth = g_call_depth - 1;

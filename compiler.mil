@@ -123,7 +123,7 @@ var OP_NATIVE = 51;
 // 15=global_names, 16=global_count, 17=global_inits, 18=global_init_count
 // 19=break_positions, 20=break_count, 21=loop_stack, 22=loop_depth
 // 23=modules, 24=module_count, 25=alias_names, 26=alias_targets, 27=alias_count
-// 28=script_dir, 29=syslib_dir
+// 28=script_dir, 29=syslib_dir, 30=parse_error (1 = fatal, stop parsing)
 func make_state(src) {
     var tokens = array(32768, 0);
     var constants = array(8192, 0);
@@ -137,7 +137,7 @@ func make_state(src) {
     var modules = array(64, 0);
     var alias_names = array(256, 0);
     var alias_targets = array(256, 0);
-    var state = [src, 0, 1, tokens, 0, 0, constants, 0, funcs, 0, bytecode, 0, var_names, 0, 0, global_names, 0, global_inits, 0, break_positions, 0, loop_stack, 0, modules, 0, alias_names, alias_targets, 0, ".", "syslib"];
+    var state = [src, 0, 1, tokens, 0, 0, constants, 0, funcs, 0, bytecode, 0, var_names, 0, 0, global_names, 0, global_inits, 0, break_positions, 0, loop_stack, 0, modules, 0, alias_names, alias_targets, 0, ".", "syslib", 0];
     return state;
 }
 func array_push(arr, val) {
@@ -926,7 +926,12 @@ func load_module(state, module_name, search_mode) {
     if (found == 0) {
         print "Parse error: cannot find module '";
         print module_name;
-        println "'";
+        print "' (searched script_dir='";
+        print state[28];
+        print "', syslib_dir='";
+        print state[29];
+        println "')";
+        state[30] = 1; // fatal: stop parsing, avoids cascade of "unknown module"
         return;
     }
     var src = readFile(path);
@@ -944,6 +949,8 @@ func load_module(state, module_name, search_mode) {
     }
     lex_source(sub);
     parse_program(sub);
+    // Propagate fatal parse errors from the module (e.g. nested require fail)
+    if (sub[30] == 1) { state[30] = 1; return; }
     // Build prefix
     var prefix = module_name + ".";
     // Rename module functions
@@ -1070,7 +1077,7 @@ func parse_require(state) {
     }
 }
 func parse_program(state) {
-    while (tok_type(state) != TOK_EOF) {
+    while (tok_type(state) != TOK_EOF && state[30] == 0) {
         if (tok_type(state) == TOK_REQUIRE) {
             parse_require(state);
         } else if (tok_type(state) == TOK_IDENT && strcmp(tok_str(state), "native") == 0) {
@@ -1380,6 +1387,11 @@ func compile_expr(state, node) {
                 ai = ai + 1;
             }
             var fi = find_func(state, cname);
+            if (fi < 0) {
+                print "Compile error: calling undefined function '";
+                print cname;
+                println "'";
+            }
             var i = 0;
             while (i < node[2]) {
                 compile_expr(state, node[3][i]);
@@ -1394,6 +1406,8 @@ func compile_expr(state, node) {
             if (is_native_fn == 1) {
                 emit(state, OP_NATIVE, fi, node[2]);
             } else {
+                // fi may be -1 for undefined calls; the VM bounds-checks OP_CALL
+                // and reports a clean error instead of crashing with index -1.
                 emit(state, OP_CALL, fi, node[2]);
             }
         }
