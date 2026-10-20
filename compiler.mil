@@ -191,7 +191,8 @@ func is_builtin_name(name) {
 func dirname(path) {
     var i = len(path) - 1;
     while (i >= 0) {
-        if (charAt(path, i) == 47) {
+        var c = charAt(path, i);
+        if (c == 47 || c == 92) {
             if (i == 0) { return "/"; }
             return substr(path, 0, i);
         }

@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Compile LLVM IR (.ll) to an object file (.o), and optionally link it with
+"""Compile LLVM IR (.ll) to an object file, and optionally link it with
 runtime.c into a native executable.
 
-The original script used llvmlite, which is deprecated and no longer available
-in this environment. This version drives the portable LLVM project binaries
-directly, exactly like the C boot toolchain in minilang-boot: it prefers
+Drives the portable LLVM project binaries directly: prefers
 $LLVM_DIR/bin/<tool>, then falls back to PATH ($LLVM_LINKER overrides the
 linker, default clang).
 
@@ -16,14 +14,21 @@ import os
 import subprocess
 import sys
 
+IS_WINDOWS = os.name == "nt"
+
 
 def find_tool(name):
+    # On Windows, append .exe if the bare name isn't found.
+    candidates = [name]
+    if IS_WINDOWS:
+        candidates.insert(0, name + ".exe")
     d = os.environ.get("LLVM_DIR")
     if d:
-        cand = os.path.join(d, "bin", name)
-        if os.access(cand, os.X_OK):
-            return cand
-    return name  # rely on PATH
+        for c in list(candidates):
+            cand = os.path.join(d, "bin", c)
+            if os.path.exists(cand):
+                return cand
+    return candidates[0]
 
 
 def main():
@@ -43,7 +48,10 @@ def main():
         rtc, binpath = sys.argv[3], sys.argv[4]
         linker = os.environ.get("LLVM_LINKER", "clang")
         cc = find_tool(linker)
-        cmd = [cc, "-O2", "-no-pie", "-o", binpath, opath, rtc]
+        cmd = [cc, "-O2", "-o", binpath, opath, rtc]
+        # -no-pie is a Unix-only linker flag; skip on Windows.
+        if not IS_WINDOWS:
+            cmd = [cc, "-O2", "-no-pie", "-o", binpath, opath, rtc]
         print("  $ " + " ".join(cmd), file=sys.stderr)
         rc = subprocess.call(cmd)
         if rc != 0:
