@@ -53,8 +53,11 @@ echo ""
 echo "=== 3. mil VM runtime matches boot VM ==="
 for f in tests/*.mil; do
     "$MINILANG" dump-text "$f" > /tmp/minilang_test.bc 2>/dev/null
-    boot_out=$("$MINILANG" run "$f" 2>&1 | sed -E 's/^[0-9]{7,}$/TIME/')
-    mil_out=$("$MINILANG" run vm.mil /tmp/minilang_test.bc 2>&1 | sed -E 's/^[0-9]{7,}$/TIME/')
+    # Normalize time-dependent outputs: time() -> 10 digits, clock_ms() ->
+    # 5-7 digits. A {5,} bound covers clock_ms() (6 digits at ~12min uptime);
+    # deterministic outputs in the suite (sqrt/abs results) are <= 4 digits.
+    boot_out=$("$MINILANG" run "$f" 2>&1 | sed -E 's/^[0-9]{5,}$/TIME/')
+    mil_out=$("$MINILANG" run vm.mil /tmp/minilang_test.bc 2>&1 | sed -E 's/^[0-9]{5,}$/TIME/')
     check "$boot_out" "$mil_out" "$f"
 done
 echo ""

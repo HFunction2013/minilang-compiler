@@ -630,15 +630,49 @@ func generate_ir(state) {
     ir_emit("declare %Value @ml_readall()\n");
     // Native (C-implemented) functions — the backend redirects calls to
     // `native func` declarations to these @ml_native_* symbols by base name,
-    // matching the boot VM's ml_native_lookup base-name fallback.
-    ir_emit("declare %Value @ml_native_sqrt(%Value)\n");
-    ir_emit("declare %Value @ml_native_abs(%Value)\n");
-    ir_emit("declare %Value @ml_native_time()\n");
-    ir_emit("declare %Value @ml_native_clock_ms()\n");
-    ir_emit("declare %Value @ml_native_getenv(%Value)\n");
-    ir_emit("declare %Value @ml_native_cwrite(%Value)\n");
-    ir_emit("declare %Value @ml_native_exit(%Value)\n");
-    ir_emit("declare %Value @ml_native_csystem(%Value)\n\n");
+    // matching the boot VM's ml_native_lookup base-name fallback. Declare each
+    // base name once (vm.mil and builtin.mil both declare the builtins), and
+    // only the natives actually declared in this program (mirrors boot).
+    var declared_natives = array(16, "");
+    var declared_native_count = 0;
+    var nfi = 0;
+    while (nfi < g_func_count_ref) {
+        var nf = state[8][nfi];
+        if (nf[4] == -1) {
+            var nbase = nf[1];
+            var npos = len(nbase) - 1;
+            while (npos >= 0) {
+                if (charAt(nbase, npos) == 46) {
+                    nbase = substr(nbase, npos + 1, len(nbase) - npos - 1);
+                    npos = -1;
+                } else { npos = npos - 1; }
+            }
+            var dup = 0;
+            var di = 0;
+            while (di < declared_native_count) {
+                if (strcmp(declared_natives[di], nbase) == 0) { dup = 1; }
+                di = di + 1;
+            }
+            if (dup == 0) {
+                if (declared_native_count >= len(declared_natives)) {
+                    declared_natives = declared_natives + array(16, "");
+                }
+                declared_natives[declared_native_count] = nbase;
+                declared_native_count = declared_native_count + 1;
+                var ndec = "declare %Value @ml_native_" + nbase + "(";
+                var npi = 0;
+                while (npi < nf[2]) {
+                    if (npi > 0) { ndec = ndec + ", "; }
+                    ndec = ndec + "%Value";
+                    npi = npi + 1;
+                }
+                ndec = ndec + ")\n";
+                ir_emit(ndec);
+            }
+        }
+        nfi = nfi + 1;
+    }
+    ir_emit("\n");
     // Register top-level global variables
     var gi = 0;
     while (gi < g_global_count_ref) {

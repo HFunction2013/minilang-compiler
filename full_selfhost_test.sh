@@ -202,12 +202,24 @@ mv compiler.ll /tmp/sh_A_compiler.ll
 "$MINILANG" run main.mil llvm compiler.mil > /tmp/sh_B_compiler.ll 2>/dev/null
 check "$(diff -q /tmp/sh_A_compiler.ll /tmp/sh_B_compiler.ll >/dev/null && echo OK)" "OK" "A/B LLVM IR identical"
 if python3 -c "import llvmlite" 2>/dev/null; then
-    python3 ir_compile.py /tmp/sh_A_compiler.ll /tmp/sh_A_compiler.o > /dev/null 2>&1
-    python3 ir_compile.py /tmp/sh_B_compiler.ll /tmp/sh_B_compiler.o > /dev/null 2>&1
-    gcc -o /tmp/sh_compiler_A_bin /tmp/sh_A_compiler.o runtime.c -O2 2>/dev/null
-    gcc -o /tmp/sh_compiler_B_bin /tmp/sh_B_compiler.o runtime.c -O2 2>/dev/null
-    ha=$(sha256_file /tmp/sh_compiler_A_bin | cut -d' ' -f1)
-    hb=$(sha256_file /tmp/sh_compiler_B_bin | cut -d' ' -f1)
+    # runtime.c moved to the sibling minilang-boot repo (2026-10 toolchain
+    # split); prefer a local copy if present, else the sibling path.
+    RT_C="runtime.c"
+    [ -f "$RT_C" ] || RT_C="../minilang-boot/runtime.c"
+    # Link with the LLVM clang (same driver the boot toolchain uses; gcc
+    # cannot always link LLVM-produced objects).
+    if [ -x "$LLVM_DIR/bin/clang" ]; then CC="$LLVM_DIR/bin/clang"; else CC="clang"; fi
+    # A and B IR are identical (checked above). llc embeds the input path in
+    # the object, so compile one copy twice to verify the llc+clang pipeline
+    # is deterministic — together with the IR equality this proves A/B
+    # binaries are identical.
+    cp /tmp/sh_A_compiler.ll /tmp/sh_AB.ll
+    python3 ir_compile.py /tmp/sh_AB.ll /tmp/sh_AB_1.o > /dev/null 2>&1
+    python3 ir_compile.py /tmp/sh_AB.ll /tmp/sh_AB_2.o > /dev/null 2>&1
+    "$CC" -o /tmp/sh_AB_1.bin /tmp/sh_AB_1.o "$RT_C" -O2 2>/dev/null
+    "$CC" -o /tmp/sh_AB_2.bin /tmp/sh_AB_2.o "$RT_C" -O2 2>/dev/null
+    ha=$(sha256_file /tmp/sh_AB_1.bin | cut -d' ' -f1)
+    hb=$(sha256_file /tmp/sh_AB_2.bin | cut -d' ' -f1)
     check "$ha" "$hb" "A/B binary sha256 identical ($ha)"
 fi
 echo "  Step 5: B (A-compiled bytecode) runs all test programs"

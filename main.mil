@@ -245,8 +245,11 @@ func cmd_build_bytecode(file) {
     println "Bytecode written: " + outpath + " (magic \"!milc\")";
     return 0;
 }
-// build -e: compile to native executable via LLVM IR + linker
-func cmd_build_executable(file) {
+// build -e: compile to native executable via LLVM IR + linker.
+// ext_files: optional user C extension sources linked into the executable
+// (e.g. "build -e prog.mil myext.c"). Native functions declared in prog.mil
+// are redirected to @ml_native_<base> symbols defined in those files.
+func cmd_build_executable(file, ext_files) {
     var src = readFile(file);
     var state = parse_source(file, src);
     var ir = llvm_gen.generate_ir(state);
@@ -273,12 +276,19 @@ func cmd_build_executable(file) {
             rtc = "../minilang-boot/runtime.c";
         }
     }
-    // Compile IR to object file and link with runtime.c (ir_compile.py drives
-    // $LLVM_DIR/bin/llc + clang, or PATH — matching the C boot toolchain).
-    // On Windows, Python is usually just "python" not "python3".
+    // Compile IR to object file and link with runtime.c + user extensions
+    // (ir_compile.py drives $LLVM_DIR/bin/llc + clang, or PATH — matching the
+    // C boot toolchain). -I points at the runtime dir so user extensions can
+    // #include "minilang_runtime.h". On Windows, Python is usually just
+    // "python" not "python3".
     var py = "python3";
     if (g_is_windows == 1) { py = "python"; }
     var cmd = py + " " + tdir + "ir_compile.py " + llpath + " " + opath + " " + rtc + " " + binpath;
+    var ei = 0;
+    while (ei < len(ext_files)) {
+        cmd = cmd + " " + ext_files[ei];
+        ei = ei + 1;
+    }
     var rc = system(cmd);
     if (rc != 0) {
         println "IR compilation failed";
@@ -294,6 +304,9 @@ func cmd_build(n) {
     }
     var argi = 2;
     var mode = 0; // 0=executable(default), 1=bytecode
+    var file = "";
+    var ext_files = array(8, "");
+    var ext_count = 0;
     while (argi < n) {
         var a = argv(argi);
         if (strcmp(a, "-b") == 0 || strcmp(a, "--bytecode") == 0) {
@@ -302,16 +315,37 @@ func cmd_build(n) {
         } else if (strcmp(a, "-e") == 0 || strcmp(a, "--executable") == 0) {
             mode = 0;
             argi = argi + 1;
+        } else if (len(file) == 0) {
+            // First non-option argument is the source file.
+            file = a;
+            argi = argi + 1;
         } else {
-            argi = n; // stop at first non-option
+            // Remaining non-option arguments are user C extension sources.
+            if (ext_count >= len(ext_files)) {
+                var bigger = array(len(ext_files) * 2, "");
+                var ci = 0;
+                while (ci < ext_count) {
+                    bigger[ci] = ext_files[ci];
+                    ci = ci + 1;
+                }
+                ext_files = bigger;
+            }
+            ext_files[ext_count] = a;
+            ext_count = ext_count + 1;
+            argi = argi + 1;
         }
     }
-    // File is the last argument
-    var file = argv(n - 1);
+    if (len(file) == 0) {
+        println "Error: build requires a filename";
+        return 1;
+    }
     if (mode == 1) {
+        if (ext_count > 0) {
+            println "Warning: C extensions are ignored for bytecode output";
+        }
         return cmd_build_bytecode(file);
     }
-    return cmd_build_executable(file);
+    return cmd_build_executable(file, ext_files);
 }
 // Map opcode number to mnemonic (matches boot dump_bytecode)
 func opcode_name(op) {

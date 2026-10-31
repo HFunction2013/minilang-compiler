@@ -11,3 +11,4 @@
 /tests/hello
 /tests/require_test
 .DS_Store
+tests/ext/opaque_test

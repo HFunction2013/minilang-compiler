@@ -1,0 +1,50 @@
+// opaque_test.mil — exercise user C extensions + OpaqueType.
+//
+// Declares three native functions backed by file_counter.c:
+//   counter_open(path)  -> opaque FILE* handle (NULL handle if open failed)
+//   counter_lines(h)    -> int line count
+//   counter_close(h)    -> nil
+// Build with:  build -e opaque_test.mil file_counter.c
+// then run:    ./opaque_test <path>  (prints the line count of that file)
+
+native func counter_open(path);
+native func counter_lines(handle);
+native func counter_close(handle);
+
+func count_lines(path) {
+    var h = counter_open(path);
+    if (h) {
+        var n = counter_lines(h);
+        counter_close(h);
+        return n;
+    }
+    println "error: cannot open " + path;
+    return -1;
+}
+
+func main() {
+    if (argc() < 2) {
+        println "usage: opaque_test <file>";
+        return 1;
+    }
+    var path = argv(1);
+    // An opaque value can be stored, compared by identity, printed, and
+    // passed to other functions.
+    var h1 = counter_open(path);
+    var h2 = counter_open(path);
+    var same = 0;
+    if (h1 == h2) { same = 1; }      // two opens -> different handles
+    println "same handle: " + toString(same);
+    println "opaque value: " + toString(h1);
+    println "line count: " + toString(count_lines(path));
+    println "truthy: " + toString(truthy_opaque(h1));
+    counter_close(h1);
+    counter_close(h2);
+    return 0;
+}
+
+func truthy_opaque(h) {
+    // Opaque truthiness: non-NULL handle is true.
+    if (h) { return 1; }
+    return 0;
+}
