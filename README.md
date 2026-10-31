@@ -85,6 +85,17 @@ make MINILANG_BOOT=$PWD/../minilang-boot/minilang
 ./minilang build tests/hello.mil    # 默认 -e
 ./tests/hello
 
+# 6.1 链接用户 C 扩展（支持 OpaqueType）
+#     扩展 C 文件跟在 .mil 之后；其中实现 .mil 里声明的 native 函数：
+#     native func myfunc(x);  →  Value ml_native_myfunc(Value x) { ... }
+#     返回不透明句柄用 ml_opaque_create(ptr)，解引用用 ml_opaque_ptr(v)。
+#     公共 API 见 minilang-boot/minilang_runtime.h。
+./minilang build -e tests/ext/opaque_test.mil tests/ext/file_counter.c
+./tests/ext/opaque_test tests/ext/opaque_test.mil
+
+# 6.2 扩展端到端验证（boot 与 self-hosted 两条构建路径）
+./ext_test.sh
+
 # 7. 交互式 REPL（mil 版：echo 管道可批处理测试）
 ./minilang repl
 printf 'println 42;\nquit\n' | ./minilang run main.mil repl
