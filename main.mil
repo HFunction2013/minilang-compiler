@@ -140,6 +140,14 @@ func cmd_run(n) {
         println "Error: run requires a filename";
         return 1;
     }
+    // `run -e prog.mil ext.c` is supported by the C bootstrap VM (dlopen);
+    // the self-hosted VM is pure minilang and cannot load C extensions.
+    if (strcmp(argv(2), "-e") == 0 || strcmp(argv(2), "--executable") == 0) {
+        println "Error: run -e (C extensions at run time) is not supported by the";
+        println "       self-hosted VM. Use `build -e prog.mil ext.c` for a native";
+        println "       executable, or run with the C bootstrap minilang binary.";
+        return 1;
+    }
     var file = argv(2);
     var src = readFile(file);
     g_prog_argc = n - 2;
@@ -297,6 +305,46 @@ func cmd_build_executable(file, ext_files) {
     println "Executable built: " + binpath;
     return 0;
 }
+func cmd_build_executable_dynamic(file, ext_files) {
+    var src = readFile(file);
+    var state = parse_source(file, src);
+    var ir = llvm_gen.generate_ir(state);
+    var base = replace_ext(file, "");
+    var llpath = base + ".ll";
+    var opath = base + ".o";
+    var binpath = base;
+    if (g_is_windows == 1) {
+        binpath = base + ".exe";
+    }
+    var ok = writeFile(llpath, ir);
+    if (ok != 1) {
+        println "Error: cannot write " + llpath;
+        return 1;
+    }
+    var tdir = get_toolchain_dir();
+    var rtc = tdir + "runtime.c";
+    if (fileExists(rtc) != 1) {
+        rtc = tdir + "../minilang-boot/runtime.c";
+        if (fileExists(rtc) != 1) {
+            rtc = "../minilang-boot/runtime.c";
+        }
+    }
+    var py = "python3";
+    if (g_is_windows == 1) { py = "python"; }
+    var cmd = py + " " + tdir + "ir_compile.py " + llpath + " " + opath + " " + rtc + " " + binpath + " --dynamic";
+    var ei = 0;
+    while (ei < len(ext_files)) {
+        cmd = cmd + " " + ext_files[ei];
+        ei = ei + 1;
+    }
+    var rc = system(cmd);
+    if (rc != 0) {
+        println "IR compilation failed";
+        return 1;
+    }
+    println "Executable built: " + binpath;
+    return 0;
+}
 func cmd_build(n) {
     if (n < 3) {
         println "Error: build requires a filename";
@@ -304,6 +352,7 @@ func cmd_build(n) {
     }
     var argi = 2;
     var mode = 0; // 0=executable(default), 1=bytecode
+    var dynamic = 0;
     var file = "";
     var ext_files = array(8, "");
     var ext_count = 0;
@@ -314,6 +363,10 @@ func cmd_build(n) {
             argi = argi + 1;
         } else if (strcmp(a, "-e") == 0 || strcmp(a, "--executable") == 0) {
             mode = 0;
+            argi = argi + 1;
+        } else if (strcmp(a, "--dynamic") == 0) {
+            // build -e --dynamic prog.mil ext.c — link extensions dynamically
+            dynamic = 1;
             argi = argi + 1;
         } else if (len(file) == 0) {
             // First non-option argument is the source file.
@@ -344,6 +397,11 @@ func cmd_build(n) {
             println "Warning: C extensions are ignored for bytecode output";
         }
         return cmd_build_bytecode(file);
+    }
+    if (dynamic == 1) {
+        // Pass --dynamic through to ir_compile.py so .c extensions are built
+        // as shared libraries and linked dynamically.
+        return cmd_build_executable_dynamic(file, ext_files);
     }
     return cmd_build_executable(file, ext_files);
 }

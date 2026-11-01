@@ -35,7 +35,9 @@ run_one() {
     local name="$1" exe="$2"
     echo "--- $name ---"
     rm -f "$BIN" "$BIN".ll "$BIN".o
-    "$exe" build -e "$PROG" "$EXTC" > /dev/null 2>&1 || { echo "  FAIL: build ($name)"; exit 1; }
+    # Note: `$exe` intentionally unquoted so a compound launcher like
+    # "$MINILANG run main.mil" splits into the interpreter + entry file.
+    $exe build -e "$PROG" "$EXTC" > /dev/null 2>&1 || { echo "  FAIL: build ($name)"; exit 1; }
     [ -x "$BIN" ] || { echo "  FAIL: no executable produced ($name)"; exit 1; }
     local out
     out=$("$BIN" "$PROG")
@@ -51,7 +53,33 @@ run_one() {
 }
 
 run_one "boot compiler" "$MINILANG"
-run_one "self-hosted main.mil" "./main"
+# Self-hosted CLI: run main.mil through the boot VM (no `main` binary needed).
+run_one "self-hosted main.mil" "$MINILANG run main.mil"
+
+echo ""
+echo "=== run -e: boot VM loads a C extension via a shared lib ==="
+echo "--- run -e (boot compiler) ---"
+out=$("$MINILANG" run -e "$PROG" "$EXTC" -- "$PROG" 2>/dev/null)
+check "$(echo "$out" | sed -n 's/^same handle: //p')" "0" "run -e: two opens give different handles"
+check "$(echo "$out" | sed -n 's/^opaque value: //p')" "<opaque>" "run -e: opaque prints as <opaque>"
+check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "run -e: extension counts lines via opaque FILE*"
+check "$(echo "$out" | sed -n 's/^truthy: //p')" "1" "run -e: non-NULL opaque is truthy"
+
+echo "--- run -e (self-hosted main.mil must give a clear error) ---"
+err=$("$MINILANG" run main.mil run -e "$PROG" "$EXTC" 2>&1 | head -1)
+case "$err" in
+    *"not supported"*) echo "  PASS: main run -e reports unsupported" ;;
+    *) echo "  FAIL: main run -e should refuse with a clear message (got: $err)"; exit 1 ;;
+esac
+
+echo ""
+echo "=== build -e --dynamic: extensions linked as shared libraries ==="
+echo "--- dynamic build (boot compiler) ---"
+rm -f "$BIN" "$BIN".ll "$BIN".o "$BIN"_ext0.so
+"$MINILANG" build -e --dynamic "$PROG" "$EXTC" > /dev/null 2>&1 || { echo "  FAIL: dynamic build"; exit 1; }
+[ -f "$BIN"_ext0.so ] || { echo "  FAIL: no shared extension produced"; exit 1; }
+out=$("$BIN" "$PROG")
+check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "dynamic executable works via .so extension"
 
 echo ""
 echo "=== Results: ext extension + OpaqueType verified ==="

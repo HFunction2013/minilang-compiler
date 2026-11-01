@@ -89,11 +89,20 @@ make MINILANG_BOOT=$PWD/../minilang-boot/minilang
 #     扩展 C 文件跟在 .mil 之后；其中实现 .mil 里声明的 native 函数：
 #     native func myfunc(x);  →  Value ml_native_myfunc(Value x) { ... }
 #     返回不透明句柄用 ml_opaque_create(ptr)，解引用用 ml_opaque_ptr(v)。
-#     公共 API 见 minilang-boot/minilang_runtime.h。
+#     公共 API 见 minilang-boot/minilang_runtime.h（Value 全模型：
+#     nil/int/string/array/opaque 构造、类型判断、下标访问、算术比较）。
 ./minilang build -e tests/ext/opaque_test.mil tests/ext/file_counter.c
 ./tests/ext/opaque_test tests/ext/opaque_test.mil
 
-# 6.2 扩展端到端验证（boot 与 self-hosted 两条构建路径）
+# 6.1.1 run 模式直接加载 C 扩展（C 引导 VM；self-hosted VM 不支持，会清晰报错）
+#       扩展 .c 会被编译成共享库并 dlopen，声明的 native 自动注册：
+./minilang run -e tests/ext/opaque_test.mil tests/ext/file_counter.c -- tests/ext/opaque_test.mil
+./minilang run -e prog.mil ext.so -- args        # 也可直接用预编译共享库
+
+# 6.1.2 动态链接构建（默认静态；--dynamic 把 .c 编译为 .so 再链接，可热替换）
+./minilang build -e --dynamic tests/ext/opaque_test.mil tests/ext/file_counter.c
+
+# 6.2 扩展端到端验证（boot 与 self-hosted 两条构建路径 + run -e + --dynamic）
 ./ext_test.sh
 
 # 7. 交互式 REPL（mil 版：echo 管道可批处理测试）

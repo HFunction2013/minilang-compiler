@@ -9,6 +9,7 @@ linker, default clang).
 Usage:
     ir_compile.py <input.ll> <output.o>
     ir_compile.py <input.ll> <output.o> <runtime.c> <output-bin> [ext.c ...]
+    ir_compile.py <input.ll> <output.o> <runtime.c> <output-bin> --dynamic [ext.c|ext.so ...]
 """
 import os
 import subprocess
@@ -46,7 +47,12 @@ def main():
     print("Compiled %s -> %s" % (llpath, opath))
     if len(sys.argv) >= 5:
         rtc, binpath = sys.argv[3], sys.argv[4]
-        exts = sys.argv[5:]
+        rest = sys.argv[5:]
+        dynamic = False
+        if rest and rest[0] == "--dynamic":
+            dynamic = True
+            rest = rest[1:]
+        exts = rest
         linker = os.environ.get("LLVM_LINKER", "clang")
         cc = find_tool(linker)
         # -I <rtc dir> so user extensions can `#include "minilang_runtime.h"`.
@@ -55,7 +61,24 @@ def main():
         cmd = [cc, "-O2", "-I", rtc_dir]
         if not IS_WINDOWS:
             cmd.append("-no-pie")
-        cmd += ["-o", binpath, opath, rtc] + exts
+        cmd += ["-o", binpath, opath, rtc]
+        # Static (default): extension .c sources are linked in directly.
+        # --dynamic: compile each .c to a shared lib beside the executable and
+        # link it, so native code can be swapped without rebuilding.
+        for e in exts:
+            if dynamic and e.endswith(".c"):
+                sopath = os.path.splitext(binpath)[0] + "_ext%d.so" % exts.index(e)
+                sub = [cc, "-O2", "-fPIC", "-shared", "-I", rtc_dir, e, "-o", sopath]
+                print("  $ " + " ".join(sub), file=sys.stderr)
+                rc = subprocess.call(sub)
+                if rc != 0:
+                    print("Failed to compile shared extension %s" % e, file=sys.stderr)
+                    return rc
+                cmd += [sopath]
+                if not IS_WINDOWS:
+                    cmd += ["-Wl,-rpath,$ORIGIN"]
+            else:
+                cmd.append(e)
         print("  $ " + " ".join(cmd), file=sys.stderr)
         rc = subprocess.call(cmd)
         if rc != 0:
