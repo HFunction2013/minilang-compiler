@@ -105,6 +105,21 @@ make MINILANG_BOOT=$PWD/../minilang-boot/minilang
 # 6.2 扩展端到端验证（boot 与 self-hosted 两条构建路径 + run -e + --dynamic）
 ./ext_test.sh
 
+# 6.3 Windows 支持（MSVC / MinGW 均可编译；MSVC 走 CMake，见 minilang-boot/CMakeLists.txt）
+#     run -e：C 扩展 + 自动生成的 adapter + runtime.c 一起打包成
+#     %TEMP%\ml_ext_<pid>.dll，LoadLibrary 后注册——扩展不依赖宿主 exe 导出符号
+#     （Windows 没有 --export-dynamic 等价物）。两种签名都支持，按扩展源码里的
+#     符号自动判定：Value ml_native_x(Value ...) 逐参风格 / 
+#     MLValue ml_vm_native_x(void*, MLValue*, int) VM 风格。
+#     预编译扩展用 .dll（Linux/macOS 用 .so），导出 ml_vm_native_<name> 即可。
+./minilang run -e prog.mil ext.c -- args
+./minilang run -e prog.mil ext.dll -- args
+
+#     build -e --dynamic：每个 .c 生成 <base>_extN.dll + 对应 .lib 导入库，
+#     可执行文件链接导入库；若当前链接器不支持导出/导入库语义，会打印警告并
+#     自动退化为静态链接，保证产物仍可运行。默认（不加 --dynamic）静态链接不变。
+./minilang build -e --dynamic prog.mil ext.c
+
 # 7. 交互式 REPL（mil 版：echo 管道可批处理测试）
 ./minilang repl
 printf 'println 42;\nquit\n' | ./minilang run main.mil repl

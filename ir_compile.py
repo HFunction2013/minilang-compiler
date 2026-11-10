@@ -67,16 +67,46 @@ def main():
         # link it, so native code can be swapped without rebuilding.
         for e in exts:
             if dynamic and e.endswith(".c"):
-                sopath = os.path.splitext(binpath)[0] + "_ext%d.so" % exts.index(e)
-                sub = [cc, "-O2", "-fPIC", "-shared", "-I", rtc_dir, e, "-o", sopath]
-                print("  $ " + " ".join(sub), file=sys.stderr)
-                rc = subprocess.call(sub)
-                if rc != 0:
-                    print("Failed to compile shared extension %s" % e, file=sys.stderr)
-                    return rc
-                cmd += [sopath]
-                if not IS_WINDOWS:
-                    cmd += ["-Wl,-rpath,$ORIGIN"]
+                suffix = ".dll" if IS_WINDOWS else ".so"
+                sopath = os.path.splitext(binpath)[0] + "_ext%d%s" % (exts.index(e), suffix)
+                if IS_WINDOWS:
+                    # Bundle runtime.c into the DLL so it needs no symbols from
+                    # the host exe (Windows has no --export-dynamic), export the
+                    # entry points this source defines and emit an import
+                    # library the exe links against; fall back to GNU ld
+                    # spellings for MinGW.
+                    libpath = sopath[:-4] + ".lib"
+                    with open(e, "r", encoding="utf-8", errors="replace") as f:
+                        entry = []
+                        for name in re.findall(r"ml_native_([A-Za-z_][A-Za-z0-9_]*)", f.read()):
+                            sym = "ml_native_" + name
+                            if sym not in entry:
+                                entry.append(sym)
+                    exports = ["-Wl,/export:%s" % s for s in entry]
+                    sub = [cc, "-O2", "-shared", "-I", rtc_dir, e,
+                           os.path.join(rtc_dir, "runtime.c"), "-o", sopath,
+                           "-Wl,/implib:%s" % libpath] + exports
+                    print("  $ " + " ".join(sub), file=sys.stderr)
+                    rc = subprocess.call(sub)
+                    if rc != 0:
+                        sub = [cc, "-O2", "-shared", "-I", rtc_dir, e,
+                               os.path.join(rtc_dir, "runtime.c"), "-o", sopath,
+                               "-Wl,--out-implib,%s" % libpath, "-Wl,--export-all-symbols"]
+                        print("  $ " + " ".join(sub), file=sys.stderr)
+                        rc = subprocess.call(sub)
+                    if rc != 0:
+                        print("Failed to compile shared extension %s" % e, file=sys.stderr)
+                        return rc
+                    cmd.append(libpath)
+                else:
+                    sub = [cc, "-O2", "-fPIC", "-shared", "-I", rtc_dir, e, "-o", sopath]
+                    print("  $ " + " ".join(sub), file=sys.stderr)
+                    rc = subprocess.call(sub)
+                    if rc != 0:
+                        print("Failed to compile shared extension %s" % e, file=sys.stderr)
+                        return rc
+                    cmd.append(sopath)
+                    cmd.append("-Wl,-rpath,$ORIGIN")
             else:
                 cmd.append(e)
         print("  $ " + " ".join(cmd), file=sys.stderr)
