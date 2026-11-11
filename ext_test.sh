@@ -65,12 +65,12 @@ check "$(echo "$out" | sed -n 's/^opaque value: //p')" "<opaque>" "run -e: opaqu
 check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "run -e: extension counts lines via opaque FILE*"
 check "$(echo "$out" | sed -n 's/^truthy: //p')" "1" "run -e: non-NULL opaque is truthy"
 
-echo "--- run -e (self-hosted main.mil must give a clear error) ---"
-err=$("$MINILANG" run main.mil run -e "$PROG" "$EXTC" 2>&1 | head -1)
-case "$err" in
-    *"not supported"*) echo "  PASS: main run -e reports unsupported" ;;
-    *) echo "  FAIL: main run -e should refuse with a clear message (got: $err)"; exit 1 ;;
-esac
+echo "--- run -e (self-hosted main.mil loads the C extension too) ---"
+out=$("$MINILANG" run main.mil run -e "$PROG" "$EXTC" -- "$PROG" 2>/dev/null)
+check "$(echo "$out" | sed -n 's/^same handle: //p')" "0" "self-hosted run -e: two opens give different handles"
+check "$(echo "$out" | sed -n 's/^opaque value: //p')" "<opaque>" "self-hosted run -e: opaque prints as <opaque>"
+check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "self-hosted run -e: extension counts lines via opaque FILE*"
+check "$(echo "$out" | sed -n 's/^truthy: //p')" "1" "self-hosted run -e: non-NULL opaque is truthy"
 
 echo ""
 echo "=== build -e --dynamic: extensions linked as shared libraries ==="

@@ -68,11 +68,17 @@ native func getenv(name);
 native func cwrite(s);
 native func exit(code);
 native func csystem(cmd);
+// Generic bridge into the host VM's native registry: dispatch OP_NATIVE for
+// names not hard-coded below (extensions loaded via `run -e`). Also builds
+// the extension .so's and registers them, driven by main.mil's cmd_run.
+native func native_invoke(name, boxed_args);
+native func ext_build_load(ext_paths, names, params);
 // ===== Value types =====
 var VAL_NIL = 0;
 var VAL_INT = 1;
 var VAL_STRING = 2;
 var VAL_ARRAY = 3;
+var VAL_OPAQUE = 4;
 // ===== VM state =====
 var g_constants = array(8192, 0);
 var g_const_count = 0;
@@ -95,6 +101,11 @@ var g_ip = 0;
 // Interpreted program args (offset from boot VM args)
 var g_prog_argc = 0;
 var g_prog_argv_offset = 1;
+// Non-empty: interpreted argv() reads this table instead of the boot argv
+// offset mapping. Used by run -e, where program args are not contiguous with
+// the program file on the outer argv line.
+var g_argv_override = array(0, "");
+func set_prog_args(args) { g_argv_override = args; }
 // ===== Value helpers =====
 func v_nil() { return [VAL_NIL, 0]; }
 func v_int(x) { return [VAL_INT, x]; }
@@ -174,6 +185,7 @@ func val_truthy(v) {
     if (v[0] == VAL_INT) { return v[1] != 0; }
     if (v[0] == VAL_STRING) { return len(v[1]) > 0; }
     if (v[0] == VAL_ARRAY) { return 1; }
+    if (v[0] == VAL_OPAQUE) { return v[1] != 0; }
     return 0;
 }
 func val_print(v, newline) {
@@ -284,6 +296,7 @@ func val_tostring(v) {
     if (v[0] == VAL_INT) { return v_str(toString(v[1])); }
     if (v[0] == VAL_NIL) { return v_str("nil"); }
     if (v[0] == VAL_ARRAY) { return v_str("<array>"); }
+    if (v[0] == VAL_OPAQUE) { return v_str("<opaque>"); }
     return v_str("");
 }
 func val_toint(v) {
@@ -625,16 +638,22 @@ func run_vm() {
             var new_arr = array(sz, init);
             push(v_arr(new_arr));
         } else if (op == OP_ARGC) {
-            push(v_int(g_prog_argc));
+            if (len(g_argv_override) > 0) { push(v_int(len(g_argv_override))); }
+            else { push(v_int(g_prog_argc)); }
         } else if (op == OP_ARGV) {
             var idxv = pop();
             var idx = idxv[1];
-            // Interpreted argv[i] = boot argv[i + g_prog_argv_offset]
-            var boot_idx = idx + g_prog_argv_offset;
-            if (boot_idx < 0 || boot_idx >= argc()) {
-                push(v_str(""));
+            if (len(g_argv_override) > 0) {
+                if (idx < 0 || idx >= len(g_argv_override)) { push(v_str("")); }
+                else { push(v_str(g_argv_override[idx])); }
             } else {
-                push(v_str(argv(boot_idx)));
+                // Interpreted argv[i] = boot argv[i + g_prog_argv_offset]
+                var boot_idx = idx + g_prog_argv_offset;
+                if (boot_idx < 0 || boot_idx >= argc()) {
+                    push(v_str(""));
+                } else {
+                    push(v_str(argv(boot_idx)));
+                }
             }
         } else if (op == OP_READFILE) {
             var pathv = pop();
@@ -707,10 +726,16 @@ func call_native(fname, args, argc) {
     if (strcmp(base, "cwrite") == 0) { cwrite(args[0][1]); return v_int(1); }
     if (strcmp(base, "exit") == 0) { exit(args[0][1]); return v_nil(); }
     if (strcmp(base, "csystem") == 0) { return v_int(csystem(args[0][1])); }
-    print "VM error: native function '";
-    print fname;
-    println "' is not registered";
-    return v_nil();
+    // Unknown name: the call must land in the host VM's registry. The host
+    // knows everything registered at runtime (extensions loaded via run -e),
+    // so forward the whole boxed argument list there.
+    var boxed = array(argc, 0);
+    var bi = 0;
+    while (bi < argc) {
+        boxed[bi] = args[bi];
+        bi = bi + 1;
+    }
+    return native_invoke(base, boxed);
 }
 // Load a program already decoded from a binary .milc file (see milc_io.decode_bytes)
 func load_program(prog) {

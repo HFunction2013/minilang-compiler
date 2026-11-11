@@ -13,6 +13,10 @@ require llvm_gen;
 require milc_io;
 require getenv from builtin;
 
+// Host VM bridge used by `run -e prog.mil ext.c ...`: ext_build_load compiles
+// and dlopens the user C extensions into the host registry.
+native func ext_build_load(ext_paths, names, params);
+
 // Detect Windows: OS env var is "Windows_NT" on Windows, unset on Unix.
 var g_is_windows = 0;
 func detect_windows() {
@@ -135,18 +139,112 @@ func is_milc_binary(src) {
     if (charAt(src, 4) != 99) { return 0; }
     return 1;
 }
+// Scan source text for `native func name(p1, p2);` declarations and return
+// [names_array, params_array, count]. Used to drive the C extension loader
+// (run -e) without depending on compiler-internal state.
+func scan_native_decls(src) {
+    var names = array(64, "");
+    var params = array(64, 0);
+    var nd = 0;
+    var L = len(src);
+    var i = 0;
+    while (i + 12 <= L && nd < 64) {
+        if (strcmp(substr(src, i, 12), "native func ") == 0) {
+            var j = i + 12;
+            var nm = "";
+            var done = 0;
+            while (j < L && done == 0) {
+                var c = charAt(src, j);
+                if ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) ||
+                    (c >= 48 && c <= 57) || c == 95) {
+                    nm = nm + chr(c);
+                    j = j + 1;
+                } else { done = 1; }
+            }
+            if (len(nm) > 0) {
+                while (j < L && (charAt(src, j) == 32 || charAt(src, j) == 9)) { j = j + 1; }
+                var pc = 0;
+                var seen = 0;
+                if (j < L && charAt(src, j) == 40) {
+                    j = j + 1;
+                    while (j < L && charAt(src, j) != 41) {
+                        var c2 = charAt(src, j);
+                        if (c2 == 44) { pc = pc + 1; }
+                        else if (c2 != 32 && c2 != 9) { seen = 1; }
+                        j = j + 1;
+                    }
+                    if (seen == 1) { pc = pc + 1; }
+                }
+                names[nd] = nm;
+                params[nd] = pc;
+                nd = nd + 1;
+            }
+            i = j;
+        } else {
+            i = i + 1;
+        }
+    }
+    return [names, params, nd];
+}
+
 func cmd_run(n) {
     if (n < 3) {
         println "Error: run requires a filename";
         return 1;
     }
-    // `run -e prog.mil ext.c` is supported by the C bootstrap VM (dlopen);
-    // the self-hosted VM is pure minilang and cannot load C extensions.
     if (strcmp(argv(2), "-e") == 0 || strcmp(argv(2), "--executable") == 0) {
-        println "Error: run -e (C extensions at run time) is not supported by the";
-        println "       self-hosted VM. Use `build -e prog.mil ext.c` for a native";
-        println "       executable, or run with the C bootstrap minilang binary.";
-        return 1;
+        // run -e prog.mil ext.c ... [-- progargs...]
+        // Compile prog.mil to bytecode, then ask the host VM to compile and
+        // dlopen every user C extension (registering its natives), and run
+        // the program inside this self-hosted VM.
+        var file = argv(3);
+        var src = readFile(file);
+        var bc_text = compile_to_bytecode(file, src);
+        if (len(bc_text) == 0) { return 1; }
+        // Collect extension sources up to "--". Build an exact-sized array
+        // (the C loader trusts the array length, so padding would be read as
+        // extra extensions / declarations).
+        var k = 4;
+        while (k < n && strcmp(argv(k), "--") != 0) {
+            k = k + 1;
+        }
+        var ec = k - 4;
+        var exts = array(ec, "");
+        var ei = 0;
+        while (ei < ec) {
+            exts[ei] = argv(4 + ei);
+            ei = ei + 1;
+        }
+        if (ec > 0) {
+            var decls = scan_native_decls(src);
+            var nd = decls[2];
+            var dnames = array(nd, "");
+            var dparams = array(nd, 0);
+            var di = 0;
+            while (di < nd) {
+                dnames[di] = decls[0][di];
+                dparams[di] = decls[1][di];
+                di = di + 1;
+            }
+            ext_build_load(exts, dnames, dparams);
+        }
+        // Remap program argv: argv(0)=prog file, then everything after "--".
+        var pac = 1;
+        if (k < n) { pac = pac + (n - k - 1); }
+        var pargs = array(pac, "");
+        pargs[0] = file;
+        if (k < n) {
+            var j = 1;
+            k = k + 1;
+            while (k < n) {
+                pargs[j] = argv(k);
+                j = j + 1;
+                k = k + 1;
+            }
+        }
+        vm.set_prog_args(pargs);
+        vm.run_bytecode(bc_text);
+        return 0;
     }
     var file = argv(2);
     var src = readFile(file);
