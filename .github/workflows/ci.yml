@@ -25,7 +25,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang build-essential
+          sudo apt-get install -y llvm clang build-essential make
 
       - name: Install LLVM (macOS)
         if: runner.os == 'macOS'
@@ -42,6 +42,11 @@ jobs:
         shell: bash
         run: cmake -B build && cmake --build build --config Release
 
+      - name: Add boot binary to PATH (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "${{ github.workspace }}/minilang-boot" >> $GITHUB_PATH
+
       - name: Full test suite (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -49,7 +54,6 @@ jobs:
           MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG_DIR: ${{ github.workspace }}
-          PATH: ${{ github.workspace }}/minilang-boot:${{ env.PATH }}
           LLVM_DIR: ${{ runner.os == 'macOS' && '/opt/homebrew/opt/llvm' || '' }}
         run: |
           set -e
