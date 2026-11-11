@@ -379,7 +379,10 @@ func cmd_build_executable(file, ext_files) {
     if (fileExists(rtc) != 1) {
         rtc = tdir + "../minilang-boot/runtime.c";
         if (fileExists(rtc) != 1) {
-            rtc = "../minilang-boot/runtime.c";
+            rtc = tdir + "minilang-boot/runtime.c";
+            if (fileExists(rtc) != 1) {
+                rtc = "../minilang-boot/runtime.c";
+            }
         }
     }
     // Compile IR to object file and link with runtime.c + user extensions
@@ -424,7 +427,10 @@ func cmd_build_executable_dynamic(file, ext_files) {
     if (fileExists(rtc) != 1) {
         rtc = tdir + "../minilang-boot/runtime.c";
         if (fileExists(rtc) != 1) {
-            rtc = "../minilang-boot/runtime.c";
+            rtc = tdir + "minilang-boot/runtime.c";
+            if (fileExists(rtc) != 1) {
+                rtc = "../minilang-boot/runtime.c";
+            }
         }
     }
     var py = "python3";
