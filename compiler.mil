@@ -42,6 +42,7 @@ var TOK_LBRACKET = 36;
 var TOK_RBRACKET = 37;
 var TOK_COMMA = 38;
 var TOK_SEMICOLON = 39;
+var TOK_NATIVE = 40;
 // ===== AST node types =====
 var NODE_INT = 0;
 var NODE_STRING = 1;
@@ -223,6 +224,7 @@ func keyword_type(word) {
     if (strcmp(word, "print") == 0) { return TOK_PRINT; }
     if (strcmp(word, "println") == 0) { return TOK_PRINTLN; }
     if (strcmp(word, "break") == 0) { return TOK_BREAK; }
+    if (strcmp(word, "native") == 0) { return TOK_NATIVE; }
     if (strcmp(word, "require") == 0) { return TOK_REQUIRE; }
     if (strcmp(word, "from") == 0) { return TOK_FROM; }
     if (strcmp(word, "in") == 0) { return TOK_IN; }
@@ -1081,8 +1083,10 @@ func parse_program(state) {
     while (tok_type(state) != TOK_EOF && state[30] == 0) {
         if (tok_type(state) == TOK_REQUIRE) {
             parse_require(state);
-        } else if (tok_type(state) == TOK_IDENT && strcmp(tok_str(state), "native") == 0) {
-            // native func name(params); — C-implemented, no body (matches boot TOK_NATIVE)
+        } else if (tok_type(state) == TOK_NATIVE) {
+            // native func name(params); — C-implemented, no body. `native` is a
+            // reserved keyword in the lexer, matching boot's TOK_NATIVE (so a
+            // variable or function named `native` is rejected by both).
             advance_tok(state); // consume 'native'
             var f = parse_func(state, 1);
             var fidx = state[9];
