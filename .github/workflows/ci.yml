@@ -31,7 +31,9 @@ jobs:
 
       - name: Install LLVM (macOS)
         if: runner.os == 'macOS'
-        run: brew install llvm
+        run: |
+          brew install llvm
+          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
 
       - name: Build boot compiler (Unix)
         if: runner.os != 'Windows'

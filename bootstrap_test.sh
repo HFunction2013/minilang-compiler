@@ -20,7 +20,7 @@ echo "Using boot binary: $MINILANG"
 echo ""
 
 echo "=== Stage 1: boot compiles compiler.mil -> native executable A ==="
-"$MINILANG" build -e compiler.mil 2>&1 | tail -1
+"$MINILANG" build -e compiler.mil 2>&1
 if [ ! -x ./compiler ]; then
     echo "ERROR: failed to build compiler executable"
     exit 1
