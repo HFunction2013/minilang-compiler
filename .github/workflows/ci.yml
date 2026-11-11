@@ -68,7 +68,7 @@ jobs:
           echo "=== every tests/*.mil through the boot VM ==="
           for f in tests/*.mil; do
             echo "--- $f ---"
-            ../minilang-boot/minilang run "$f"
+            minilang run "$f"
           done
 
       - name: VM smoke over tests/*.mil (Windows)
