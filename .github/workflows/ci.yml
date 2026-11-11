@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout compiler
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Checkout boot toolchain (sibling)
         uses: actions/checkout@v4
