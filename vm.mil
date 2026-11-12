@@ -324,6 +324,17 @@ func pop() {
 // ===== Bytecode parser =====
 // Parse text bytecode from input string
 func load_bytecode(input) {
+    // Normalize CRLF to LF: text bytecode saved on Windows may carry a
+    // trailing '\r' per line. Drop raw CR bytes here; an escaped \r inside a
+    // string constant is stored as backslash-r and is unaffected.
+    var data = "";
+    var di = 0;
+    var dlen = len(input);
+    while (di < dlen) {
+        if (charAt(input, di) != 13) { data = data + char_to_str(charAt(input, di)); }
+        di = di + 1;
+    }
+    input = data;
     var pos = 0;
     var inlen = len(input);
     // Helper: read next line
