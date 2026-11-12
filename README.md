@@ -1,6 +1,6 @@
 # minilang
 
-一个极简的可自举编程语言，支持双编译后端：字节码 VM 和 LLVM 原生编译。
+一个极简的可自举编程语言，支持双编译后端：字节码 VM 和 C 原生编译。
 
 源文件后缀为 `.mil`，字节码文件后缀为 `.milc`（魔数 `!milc`）。
 
@@ -16,13 +16,12 @@
 - **C-like 语法**：函数、递归、if/else、while、var 声明、数组、字符串
 - **双后端**：
   - 字节码 + 栈式 VM（快速开发、调试）
-  - LLVM IR → 原生可执行文件（高性能，用 LLVM 项目二进制 `llc`+`clang` 链接）
+  - C 源码 → 系统 C 编译器 `-O2` 编译为原生可执行文件
 - **完整自举**：所有 C 源文件（见 minilang-boot）均有对应的 minilang 实现，仅靠最小 boot VM 即可独立运行完整工具链
   - `compiler.mil`：词法分析 + 解析 + 字节码生成（对应 lexer.c/parser.c/bytecode.c）
   - `vm.mil`：纯 mil 栈式虚拟机（对应 vm.c/value.c/runtime.c）
-  - `llvm_gen.mil`：LLVM IR 生成器（对应 llvm_gen.c）
   - `milc_io.mil`：字节码序列化（对应 milc_io.c，二进制 `!milc` 格式）
-  - `main.mil`：统一 CLI 入口（对应 main.c）
+  - `main.mil`：统一 CLI 入口（对应 main.c）；原生 C 发射委托 boot 二进制完成
 - **自举编译器**：`compiler.mil` 能编译自身，输出与 C boot 编译器逐字节一致
 - **Native（C）方法**：`native func name(params);` 声明无函数体，由 C（`native.c`，见 minilang-boot）实现，VM 通过 `OP_NATIVE` 分发；声明集中在 `syslib/builtin.mil`
 - **内置函数**：`len`, `charAt`, `substr`, `toString`, `toInt`, `strcmp`, `readAll`, `array`, `argc`, `argv`, `readFile`, `fileExists`, `writeFile`, `system`, `readLine`, `readFileBytes`, `writeFileBytes`, `chr`
@@ -48,14 +47,16 @@ make MINILANG_BOOT=$PWD/../minilang-boot/minilang
 可直接使用；若 boot 二进制不在 `../minilang-boot/minilang`，请设置
 `MINILANG_BOOT`，或自行把二进制复制/链接为 `./minilang`。
 
-### LLVM 后端依赖
+### C 原生构建依赖
 
-原生可执行文件链接直接使用 **LLVM 项目二进制**（不再依赖 Python llvmlite）：
+原生可执行文件由 boot 后端先发射 C 源码（`<base>.c`），再用**系统 C 编译器**
+在 `-O2` 下编译并链接 `runtime.c`：
 
-- `llc`：把 `.ll` 汇编成目标文件
-- `clang`（或 `ld.lld`，可用 `LLVM_LINKER` 覆盖）：链接目标文件与 `runtime.c`
+```
+cc -O2 -I<runtime dir> <base>.c runtime.c [预编译扩展] -o <bin>
+```
 
-把 LLVM 安装路径放进 `LLVM_DIR`（自动找 `$LLVM_DIR/bin/llc`、`clang`），或直接让 `llc`/`clang` 在 `PATH` 上。
+编译器驱动取 `$CC`（Unix 默认 `cc`，Windows 默认 `clang`）；不依赖 LLVM/llc/llvmlite。
 
 ## CLI 用法
 
@@ -72,53 +73,51 @@ make MINILANG_BOOT=$PWD/../minilang-boot/minilang
 ./minilang dump-text tests/hello.mil
 ./minilang dump-text tests/hello.milc
 
-# 4. 输出 LLVM IR (.ll 文件)
-./minilang llvm tests/hello.mil
+# 4. 输出 C 源码 (.c 文件)
+./minilang c tests/hello.mil
 
 # 5. 编译为 .milc 字节码文件（魔数 "!milc"）
 ./minilang build -b tests/hello.mil
 ./minilang build --bytecode tests/hello.mil
 
-# 6. 编译为原生可执行文件 (LLVM 后端, 默认)
+# 6. 编译为原生可执行文件 (C 后端, 默认)
 ./minilang build -e tests/hello.mil
 ./minilang build --executable tests/hello.mil
 ./minilang build tests/hello.mil    # 默认 -e
 ./tests/hello
 
 # 6.1 链接用户 C 扩展（支持 OpaqueType）
-#     扩展 C 文件跟在 .mil 之后；其中实现 .mil 里声明的 native 函数：
+#     扩展必须先由你自己预编译；工具链不会现场编译 .c。其中实现 .mil 里
+#     声明的 native 函数：
 #     native func myfunc(x);  →  Value ml_native_myfunc(Value x) { ... }
 #     返回不透明句柄用 ml_opaque_create(ptr)，解引用用 ml_opaque_ptr(v)。
 #     公共 API 见 minilang-boot/minilang_runtime.h（Value 全模型：
 #     nil/int/string/array/opaque 构造、类型判断、下标访问、算术比较）。
-./minilang build -e tests/ext/opaque_test.mil tests/ext/file_counter.c
+cc -O2 -fPIC -I<minilang-boot> -c tests/ext/file_counter.c -o tests/ext/file_counter.o
+./minilang build -e tests/ext/opaque_test.mil tests/ext/file_counter.o
 ./tests/ext/opaque_test tests/ext/opaque_test.mil
 
-# 6.1.1 run 模式直接加载 C 扩展（C 引导 VM；self-hosted VM 不支持，会清晰报错）
-#       扩展 .c 会被编译成共享库并 dlopen，声明的 native 自动注册：
-./minilang run -e tests/ext/opaque_test.mil tests/ext/file_counter.c -- tests/ext/opaque_test.mil
-./minilang run -e prog.mil ext.so -- args        # 也可直接用预编译共享库
+# 6.1.1 run 模式加载预编译共享库（boot VM 与 self-hosted VM 均支持）
+#       预编译为 .so（Windows 为 .dll）后由 run -e 加载，声明的 native 自动注册：
+cc -O2 -fPIC -shared -I<minilang-boot> tests/ext/file_counter.c -o tests/ext/file_counter.so
+./minilang run -e tests/ext/opaque_test.mil tests/ext/file_counter.so -- tests/ext/opaque_test.mil
+./minilang run -e prog.mil ext.so -- args
+# 直接传裸 .c 会被拒绝。
 
-# 6.1.2 动态链接构建（默认静态；--dynamic 把 .c 编译为 .so 再链接，可热替换）
-./minilang build -e --dynamic tests/ext/opaque_test.mil tests/ext/file_counter.c
+# 6.1.2 --dynamic 兼容保留但已无效：预编译共享库本就是动态的，不再现场编译
+./minilang build -e --dynamic tests/ext/opaque_test.mil tests/ext/file_counter.o
 
-# 6.2 扩展端到端验证（boot 与 self-hosted 两条构建路径 + run -e + --dynamic）
+# 6.2 扩展端到端验证（boot 与 self-hosted 两条构建路径 + run -e 载 .so + 裸 .c 拒绝）
 ./ext_test.sh
 
 # 6.3 Windows 支持（MSVC / MinGW 均可编译；MSVC 走 CMake，见 minilang-boot/CMakeLists.txt）
-#     run -e：C 扩展 + 自动生成的 adapter + runtime.c 一起打包成
-#     %TEMP%\ml_ext_<pid>.dll，LoadLibrary 后注册——扩展不依赖宿主 exe 导出符号
-#     （Windows 没有 --export-dynamic 等价物）。两种签名都支持，按扩展源码里的
-#     符号自动判定：Value ml_native_x(Value ...) 逐参风格 / 
+#     扩展由你自己预编译为 .dll（Linux/macOS 用 .so），run -e 用 LoadLibrary 加载；
+#     不再把 .c + adapter + runtime.c 临时打包成进程 DLL。两种签名都支持，按符号
+#     自动判定：Value ml_native_x(Value ...) 逐参风格 /
 #     MLValue ml_vm_native_x(void*, MLValue*, int) VM 风格。
-#     预编译扩展用 .dll（Linux/macOS 用 .so），导出 ml_vm_native_<name> 即可。
-./minilang run -e prog.mil ext.c -- args
 ./minilang run -e prog.mil ext.dll -- args
 
-#     build -e --dynamic：每个 .c 生成 <base>_extN.dll + 对应 .lib 导入库，
-#     可执行文件链接导入库；若当前链接器不支持导出/导入库语义，会打印警告并
-#     自动退化为静态链接，保证产物仍可运行。默认（不加 --dynamic）静态链接不变。
-./minilang build -e --dynamic prog.mil ext.c
+#     桥接限制：packed 签名仅支持 0–3 个参数；跨 ABI 的数组参数不做深转换。
 
 # 7. 交互式 REPL（mil 版：echo 管道可批处理测试）
 ./minilang repl
@@ -130,7 +129,7 @@ printf 'println 42;\nquit\n' | ./minilang run main.mil repl
 ```
 
 `main.mil`（mil 版统一入口）提供与 boot `minilang` 完全一致的全部命令：
-`run` / `bytecode` / `dump-text` / `llvm` / `build -b|-e` / `repl` / `self-test`。
+`run` / `bytecode` / `dump-text` / `c` / `build -b|-e` / `repl` / `self-test`。
 其中 `self-test` 用 mil 编译器编译 `compiler.mil` 并输出其字节码（与 boot 逐字节一致）。
 
 ```bash
@@ -335,7 +334,7 @@ SUCCESS: Boot and self-hosted bytecode are IDENTICAL!
 | vm.c | vm.mil | 栈式虚拟机 |
 | value.c | vm.mil | 值类型与运算 |
 | runtime.c | vm.mil | 内置函数运行时 |
-| llvm_gen.c | llvm_gen.mil | AST → LLVM IR 生成 |
+| c_gen.c | （无 mil 对应；main.mil 委托 boot 二进制发射 C） | AST → C 源码生成 |
 | milc_io.c | milc_io.mil | 字节码序列化（二进制 `!milc`） |
 | main.c | main.mil | 统一 CLI 入口 |
 
@@ -343,7 +342,7 @@ SUCCESS: Boot and self-hosted bytecode are IDENTICAL!
 
 ### main.mil 统一入口
 
-`main.mil` 整合了编译器、VM 和 LLVM 生成器，提供与 C `main.c` 一致的 CLI：
+`main.mil` 整合了编译器、VM 和 CLI，提供与 C `main.c` 一致的命令；原生 C 发射委托 boot 二进制完成：
 
 ```bash
 # 编译并运行程序
@@ -352,8 +351,8 @@ SUCCESS: Boot and self-hosted bytecode are IDENTICAL!
 # 输出文本字节码
 ./minilang run main.mil dump-text tests/hello.mil
 
-# 输出 LLVM IR
-./minilang run main.mil llvm tests/hello.mil
+# 输出 C 源码
+./minilang run main.mil c tests/hello.mil
 
 # 人类可读字节码反汇编（与 boot bytecode 输出逐字节一致）
 ./minilang run main.mil bytecode tests/hello.mil
@@ -361,7 +360,7 @@ SUCCESS: Boot and self-hosted bytecode are IDENTICAL!
 # 编译为 .milc 字节码文件（二进制，与 boot 逐字节一致）
 ./minilang run main.mil build -b tests/hello.mil
 
-# 编译为原生可执行文件（LLVM IR + ir_compile.py + gcc）
+# 编译为原生可执行文件（发射 C 源码 + 系统 cc -O2）
 ./minilang run main.mil build -e tests/hello.mil
 
 # 交互式 REPL 与自举自检
@@ -372,7 +371,7 @@ SUCCESS: Boot and self-hosted bytecode are IDENTICAL!
 ### 完整自举链路验证
 
 ```bash
-# 1. boot 编译 main.mil（含 compiler/vm/llvm_gen 全部模块）为文本字节码
+# 1. boot 编译 main.mil（含 compiler/vm 全部模块）为文本字节码
 ./minilang dump-text main.mil > /tmp/main.bc
 
 # 2. mil VM 运行 main.bc，编译 compiler.mil
@@ -404,7 +403,7 @@ VS Code / Cursor 扩展在**独立仓库** `minilang-vscode` 中维护，两者�
 - 语法高亮（`.mil` 源码）
 - 输入时实时诊断——调用真实的 `minilang` 工具链，把 `Parse error line N` 标到对应行
 - 悬停文档、补全、签名提示、跳转到定义、代码片段
-- 命令：终端运行、REPL、字节码反汇编、dump-text、LLVM IR、build -b / -e
+- 命令：终端运行、REPL、字节码反汇编、dump-text、生成 C 源码、build -b / -e
 - **`.milc` 查看器**：`.milc` 是二进制字节码，插件为 `*.milc` 注册了自定义编辑器并设为默认，
   **双击即直接打开**，可在 Text Bytecode（`dump-text` 的 MINILANGBC 格式）与
   Bytecode Assembly（`bytecode` 反汇编）之间切换
@@ -419,21 +418,10 @@ VS Code / Cursor 扩展在**独立仓库** `minilang-vscode` 中维护，两者�
 
 ```
 minilang/
-├── minilang.h        # 公共头文件（值类型、AST、字节码、VM、函数声明）
-├── value.c           # 值类型与运算
-├── lexer.c           # 词法分析器
-├── parser.c          # 递归下降解析器（含 require 模块系统）
-├── bytecode.c        # AST → 字节码编译器
-├── vm.c              # 栈式虚拟机
-├── llvm_gen.c        # AST → LLVM IR 生成器
-├── milc_io.c         # .milc 字节码序列化/反序列化
-├── runtime.c         # LLVM 后端 C 运行时
-├── main.c            # CLI 入口（run/bytecode/llvm/build/repl/self-test）
 ├── compiler.mil      # 自举编译器（minilang 语言实现，对应 lexer/parser/bytecode.c）
 ├── vm.mil            # 纯 mil 实现的虚拟机（对应 vm.c/value.c/runtime.c）
-├── llvm_gen.mil      # 纯 mil 实现的 LLVM IR 生成器（对应 llvm_gen.c）
 ├── milc_io.mil       # 纯 mil 实现的字节码序列化（对应 milc_io.c，二进制 !milc）
-├── main.mil          # 纯 mil 实现的统一 CLI 入口（对应 main.c）
+├── main.mil          # 纯 mil 实现的统一 CLI 入口（对应 main.c；原生 C 发射委托 boot）
 ├── syslib/           # 内置模块库
 │   ├── math.mil      # 整数数学库
 │   ├── string.mil    # 字符串工具库
@@ -444,8 +432,6 @@ minilang/
 │   ├── rand.mil      # 可复现伪随机数
 │   └── word.mil      # 嵌套 require 示例
 ├── minilang.lsh      # LSH 语法高亮定义（microsoft/edit 格式）
-├── requirements.txt  # Python 依赖（llvmlite）
-├── ir_compile.py     # LLVM IR → .o 编译脚本（llvmlite）
 ├── bootstrap_test.sh # 自举验证脚本
 ├── Makefile          # 构建文件
 └── tests/            # 测试程序
@@ -487,5 +473,5 @@ MINILANGBC
 - **模块系统**：require 在解析阶段加载模块源码；`syslib/` 按**可执行文件所在目录**定位
   （Linux 走 `/proc/self/exe`，macOS 走 `_NSGetExecutablePath`，最后回退到 argv[0] 并沿 PATH 查找），
   因此从任何工作目录运行都能找到标准库；脚本目录取绝对路径，同目录 `require` 也不受 cwd 影响。
-  仍可用 `MINILANG_DIR` 环境变量显式覆盖，函数以 `模块名.函数名` 命名并注册，模块内部互调也加上前缀；别名（`require f from m`）建立 `f` → `m.f` 映射，字节码和 LLVM 后端统一解析
+  仍可用 `MINILANG_DIR` 环境变量显式覆盖，函数以 `模块名.函数名` 命名并注册，模块内部互调也加上前缀；别名（`require f from m`）建立 `f` → `m.f` 映射，字节码和 C 后端统一解析
 - **自举确定性**：boot 编译器和自举编译器使用相同的字节码编码规则，确保输出一致

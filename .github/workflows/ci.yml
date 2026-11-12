@@ -21,19 +21,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: HFunction2013/minilang-boot
+          ref: ${{ github.head_ref || github.ref_name }}
           path: minilang-boot
 
-      - name: Install LLVM + build tools (Ubuntu)
+      - name: Install C toolchain + make (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang build-essential make
-
-      - name: Install LLVM (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install llvm
-          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+          sudo apt-get install -y build-essential make
 
       - name: Build boot compiler (Unix)
         if: runner.os != 'Windows'
@@ -58,7 +53,6 @@ jobs:
           MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG_DIR: ${{ github.workspace }}
-          LLVM_DIR: ${{ runner.os == 'macOS' && '/opt/homebrew/opt/llvm' || '' }}
         run: |
           set -e
           bash vm_test.sh
