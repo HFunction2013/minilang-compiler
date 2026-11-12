@@ -1,6 +1,9 @@
-*.ll
 *.o
+*.so
 *.milc
+# Generated C sources and native executables produced by `build -e` / `c`
+tests/*.c
+tests/ext/*.c
 /main
 /minilang
 /compiler
@@ -10,6 +13,8 @@
 /tests/fib
 /tests/hello
 /tests/require_test
+/tests/json_test
+/tests/native_test
+/tests/stdlib_test
 .DS_Store
 tests/ext/opaque_test
-*.so

@@ -1,24 +1,33 @@
 #!/bin/bash
 # ext_test.sh — verify user C extensions + OpaqueType end to end.
 #
-# Builds tests/ext/opaque_test.mil twice (boot compiler and self-hosted
-# main.mil), linking tests/ext/file_counter.c, then runs the executables and
-# asserts the opaque-handle behaviour:
+# The toolchain never compiles extension C on the fly. This script first
+# precompiles tests/ext/file_counter.c itself:
+#   * an object file linked into a native executable via `build -e`, and
+#   * a shared library loaded by the interpreted VM via `run -e`.
+# then runs the executables and asserts the opaque-handle behaviour:
 #   - two opens yield different handles (identity ==)
 #   - an opaque value prints as <opaque>
 #   - a non-NULL handle is truthy
 #   - the C extension can count lines through an opaque FILE* handle
 #
-# Usage: ./ext_test.sh   (set LLVM_DIR/PATH/MINILANG_DIR as for the other suites)
+# Usage: ./ext_test.sh   (set MINILANG_BOOT / MINILANG_DIR / CC as for other suites)
 set -e
 
 cd "$(dirname "$0")"
-MINILANG=${MINILANG:-../minilang-boot/minilang}
+MINILANG="${MINILANG:-../minilang-boot/minilang}"
+if [ ! -x "$MINILANG" ]; then MINILANG="./minilang"; fi
+CC="${CC:-cc}"
 
 EXT_DIR=tests/ext
 PROG=$EXT_DIR/opaque_test.mil
 EXTC=$EXT_DIR/file_counter.c
+OBJ=$EXT_DIR/file_counter.o
+SO=$EXT_DIR/file_counter.so
 BIN=$EXT_DIR/opaque_test
+
+# Boot include dir for minilang_runtime.h: sibling minilang-boot repo.
+BOOT_DIR="$(cd "$(dirname "$MINILANG")" && pwd)"
 
 check() {
     if [ "$1" = "$2" ]; then
@@ -29,15 +38,18 @@ check() {
     fi
 }
 
-pass=0
-fail=0
+echo "=== Precompile extension C (no on-the-fly compilation by minilang) ==="
+"$CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
+"$CC" -O2 -fPIC -shared -I"$BOOT_DIR" "$EXTC" -o "$SO"
+echo "  object: $OBJ ; shared library: $SO"
+
 run_one() {
     local name="$1" exe="$2"
-    echo "--- $name ---"
-    rm -f "$BIN" "$BIN".ll "$BIN".o
+    echo "--- $name (build -e, link precompiled object) ---"
+    rm -f "$BIN" "$BIN".c
     # Note: `$exe` intentionally unquoted so a compound launcher like
     # "$MINILANG run main.mil" splits into the interpreter + entry file.
-    $exe build -e "$PROG" "$EXTC" > /dev/null 2>&1 || { echo "  FAIL: build ($name)"; exit 1; }
+    $exe build -e "$PROG" "$OBJ" > /dev/null 2>&1 || { echo "  FAIL: build ($name)"; exit 1; }
     [ -x "$BIN" ] || { echo "  FAIL: no executable produced ($name)"; exit 1; }
     local out
     out=$("$BIN" "$PROG")
@@ -57,29 +69,29 @@ run_one "boot compiler" "$MINILANG"
 run_one "self-hosted main.mil" "$MINILANG run main.mil"
 
 echo ""
-echo "=== run -e: boot VM loads a C extension via a shared lib ==="
+echo "=== run -e: interpreted VM loads a prebuilt shared library ==="
 echo "--- run -e (boot compiler) ---"
-out=$("$MINILANG" run -e "$PROG" "$EXTC" -- "$PROG" 2>&1) || echo "  [run -e exited non-zero]"
+out=$("$MINILANG" run -e "$PROG" "$SO" -- "$PROG" 2>&1) || echo "  [run -e exited non-zero]"
 check "$(echo "$out" | sed -n 's/^same handle: //p')" "0" "run -e: two opens give different handles"
 check "$(echo "$out" | sed -n 's/^opaque value: //p')" "<opaque>" "run -e: opaque prints as <opaque>"
 check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "run -e: extension counts lines via opaque FILE*"
 check "$(echo "$out" | sed -n 's/^truthy: //p')" "1" "run -e: non-NULL opaque is truthy"
 
-echo "--- run -e (self-hosted main.mil loads the C extension too) ---"
-out=$("$MINILANG" run main.mil run -e "$PROG" "$EXTC" -- "$PROG" 2>&1) || echo "  [self-hosted run -e exited non-zero]"
+echo "--- run -e (self-hosted main.mil loads the shared library too) ---"
+out=$("$MINILANG" run main.mil run -e "$PROG" "$SO" -- "$PROG" 2>&1) || echo "  [self-hosted run -e exited non-zero]"
 check "$(echo "$out" | sed -n 's/^same handle: //p')" "0" "self-hosted run -e: two opens give different handles"
 check "$(echo "$out" | sed -n 's/^opaque value: //p')" "<opaque>" "self-hosted run -e: opaque prints as <opaque>"
 check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "self-hosted run -e: extension counts lines via opaque FILE*"
 check "$(echo "$out" | sed -n 's/^truthy: //p')" "1" "self-hosted run -e: non-NULL opaque is truthy"
 
 echo ""
-echo "=== build -e --dynamic: extensions linked as shared libraries ==="
-echo "--- dynamic build (boot compiler) ---"
-rm -f "$BIN" "$BIN".ll "$BIN".o "$BIN"_ext0.so
-"$MINILANG" build -e --dynamic "$PROG" "$EXTC" > /dev/null 2>&1 || { echo "  FAIL: dynamic build"; exit 1; }
-[ -f "$BIN"_ext0.so ] || { echo "  FAIL: no shared extension produced"; exit 1; }
-out=$("$BIN" "$PROG")
-check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "dynamic executable works via .so extension"
+echo "=== Reject raw .c extension sources ==="
+if "$MINILANG" build -e "$PROG" "$EXTC" > /dev/null 2>&1; then
+    echo "  FAIL: build -e accepted a raw .c source"
+    exit 1
+else
+    echo "  PASS: build -e rejects a raw .c source"
+fi
 
 echo ""
-echo "=== Results: ext extension + OpaqueType verified ==="
+echo "=== Results: extension + OpaqueType verified ==="

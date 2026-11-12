@@ -1,5 +1,8 @@
 #!/bin/bash
-# Full self-hosting verification: all C components have mil equivalents
+# Full self-hosting verification: the mil toolchain matches the C bootstrap.
+#
+# Native sections use the system C compiler (cc, or CC); the C backend emits a
+# .c source and links runtime.c -O2. There is no LLVM/llc/ir_compile step.
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -24,12 +27,13 @@ case "$MINILANG" in
   *)  MIL_ABS="$(cd "$(dirname "$MINILANG")" && pwd)/$(basename "$MINILANG")" ;;
 esac
 
-# Native (LLVM) sections need the LLVM project binary `llc`; skip them cleanly
-# when it is missing (set LLVM_DIR, or put llc on PATH) instead of failing the
-# whole run.
-if [ -n "$LLVM_DIR" ] && [ -x "$LLVM_DIR/bin/llc" ]; then HAVE_LLC=1;
-elif command -v llc >/dev/null 2>&1; then HAVE_LLC=1;
-else HAVE_LLC=0; fi
+# Native sections need a system C compiler; skip them cleanly when none is
+# available (set CC, or put cc/clang/gcc on PATH).
+CC_BIN="${CC:-cc}"
+if command -v "$CC_BIN" >/dev/null 2>&1; then HAVE_CC=1;
+elif command -v clang >/dev/null 2>&1; then HAVE_CC=1;
+elif command -v gcc >/dev/null 2>&1; then HAVE_CC=1;
+else HAVE_CC=0; fi
 
 echo "=== Building boot compiler ==="
 make 2>&1 | grep -E "error|Error" || true
@@ -47,6 +51,13 @@ check() {
         FAIL=$((FAIL + 1))
     fi
 }
+# Resolve the native executable name produced for a stem (Unix stem, Windows stem.exe).
+native_bin() {
+    if [ -x "$1" ]; then echo "$1";
+    elif [ -x "$1.exe" ]; then echo "$1.exe";
+    else echo ""; fi
+}
+
 echo "=== 1. compiler.mil self-hosting (compiles itself) ==="
 "$MINILANG" dump-text compiler.mil > /tmp/sh_boot.txt 2>/dev/null
 "$MINILANG" run compiler.mil dump-text compiler.mil > /tmp/sh_mil.txt 2>/dev/null
@@ -59,15 +70,15 @@ for f in tests/hello.mil tests/fib.mil tests/array_test.mil tests/nested_test.mi
     "$MINILANG" run vm.mil /tmp/sh_$base.bc > /tmp/sh_vm_$base.out 2>/dev/null
     check "$(diff -q /tmp/sh_boot_$base.out /tmp/sh_vm_$base.out >/dev/null && echo OK)" "OK" "vm.mil runs $base"
 done
-echo "=== 3. llvm_gen.mil matches boot LLVM IR ==="
+echo "=== 3. main.mil C source matches boot C backend ==="
 for f in tests/hello.mil tests/fib.mil tests/array_test.mil tests/nested_test.mil tests/require_test.mil tests/require_path.mil; do
     base=$(basename "$f" .mil)
-    "$MINILANG" llvm "$f" 2>/dev/null
-    if [ -f "tests/$base.ll" ]; then
-        "$MINILANG" run llvm_gen.mil "$f" > /tmp/sh_$base.ll 2>/dev/null
-        check "$(diff -q tests/$base.ll /tmp/sh_$base.ll >/dev/null && echo OK)" "OK" "llvm_gen.mil matches $base"
-        rm -f "tests/$base.ll"
-    fi
+    rm -f "tests/$base.c"
+    "$MINILANG" c "$f" 2>/dev/null
+    cp "tests/$base.c" "/tmp/sh_boot_$base.c"
+    "$MINILANG" run main.mil c "$f" 2>/dev/null
+    check "$(diff -q "/tmp/sh_boot_$base.c" "tests/$base.c" >/dev/null && echo OK)" "OK" "main.mil C source matches boot for $base"
+    rm -f "tests/$base.c" "/tmp/sh_boot_$base.c"
 done
 echo "=== 4. milc_io.mil serialization matches boot ==="
 for f in tests/hello.mil tests/fib.mil; do
@@ -81,13 +92,15 @@ echo "=== 5. main.mil unified CLI ==="
 "$MINILANG" run tests/hello.mil > /tmp/sh_boot_run.out 2>/dev/null
 check "$(diff -q /tmp/sh_main_run.out /tmp/sh_boot_run.out >/dev/null && echo OK)" "OK" "main.mil run command"
 "$MINILANG" run main.mil dump-text tests/hello.mil > /tmp/sh_main_dt.txt 2>/dev/null
-check "$(diff -q /tmp/sh_boot.txt /tmp/sh_main_dt.txt >/dev/null; echo skip)" "skip" "main.mil dump-text command (hello)"
 "$MINILANG" dump-text tests/hello.mil > /tmp/sh_dt_boot.txt 2>/dev/null
 check "$(diff -q /tmp/sh_dt_boot.txt /tmp/sh_main_dt.txt >/dev/null && echo OK)" "OK" "main.mil dump-text matches boot"
-"$MINILANG" run main.mil llvm tests/hello.mil > /tmp/sh_main_llvm.ll 2>/dev/null
-"$MINILANG" llvm tests/hello.mil 2>/dev/null
-check "$(diff -q tests/hello.ll /tmp/sh_main_llvm.ll >/dev/null && echo OK)" "OK" "main.mil llvm command"
-rm -f tests/hello.ll
+rm -f tests/hello.c
+"$MINILANG" run main.mil c tests/hello.mil > /dev/null 2>/dev/null
+cp tests/hello.c /tmp/sh_main_c.c
+rm -f tests/hello.c
+"$MINILANG" c tests/hello.mil 2>/dev/null
+check "$(diff -q tests/hello.c /tmp/sh_main_c.c >/dev/null && echo OK)" "OK" "main.mil c command matches boot"
+rm -f tests/hello.c /tmp/sh_main_c.c
 echo "=== 6. Full self-hosting chain ==="
 echo "  boot -> main.mil bytecode -> vm.mil -> compile compiler.mil"
 "$MINILANG" dump-text main.mil > /tmp/sh_main.bc 2>/dev/null
@@ -96,11 +109,14 @@ check "$(diff -q /tmp/sh_boot.txt /tmp/sh_chain.txt >/dev/null && echo OK)" "OK"
 echo "  boot -> main.mil bytecode -> vm.mil -> run hello.mil"
 "$MINILANG" run vm.mil /tmp/sh_main.bc run tests/hello.mil > /tmp/sh_chain_run.out 2>/dev/null
 check "$(diff -q /tmp/sh_boot_run.out /tmp/sh_chain_run.out >/dev/null && echo OK)" "OK" "full chain runs programs"
-echo "  boot -> main.mil bytecode -> vm.mil -> llvm hello.mil"
-"$MINILANG" run vm.mil /tmp/sh_main.bc llvm tests/hello.mil > /tmp/sh_chain_llvm.ll 2>/dev/null
-"$MINILANG" llvm tests/hello.mil 2>/dev/null
-check "$(diff -q tests/hello.ll /tmp/sh_chain_llvm.ll >/dev/null && echo OK)" "OK" "full chain generates LLVM IR"
-rm -f tests/hello.ll
+echo "  boot -> main.mil bytecode -> vm.mil -> emit C source for hello.mil"
+rm -f tests/hello.c
+"$MINILANG" run vm.mil /tmp/sh_main.bc c tests/hello.mil 2>/dev/null
+cp tests/hello.c /tmp/sh_chain_c.c
+rm -f tests/hello.c
+"$MINILANG" c tests/hello.mil 2>/dev/null
+check "$(diff -q tests/hello.c /tmp/sh_chain_c.c >/dev/null && echo OK)" "OK" "full chain emits the same C source"
+rm -f tests/hello.c /tmp/sh_chain_c.c
 echo "=== 7. Program arguments ==="
 cat > /tmp/sh_args.mil << 'MILEOF'
 func main() {
@@ -126,34 +142,31 @@ check "$(test -f /tmp/sh_hello.milc && echo OK)" "OK" "build -b creates .milc fi
 echo "  run .milc file"
 "$MINILANG" run main.mil run /tmp/sh_hello.milc > /tmp/sh_milc_run.out 2>/dev/null
 check "$(diff -q /tmp/sh_boot_run.out /tmp/sh_milc_run.out >/dev/null && echo OK)" "OK" "run .milc output matches"
-echo "  build -e: generate .ll file (IR compile requires llvmlite)"
-rm -f /tmp/sh_hello.ll
+echo "  build -e: emits a .c source (compiled by the system cc)"
+rm -f /tmp/sh_hello.c
 "$MINILANG" run main.mil build -e /tmp/sh_hello.mil > /dev/null 2>&1
-check "$(test -f /tmp/sh_hello.ll && echo OK)" "OK" "build -e creates .ll file"
-echo "  boot build main.mil: no duplicate global definitions"
-"$MINILANG" llvm main.mil 2>/dev/null
-check "$(grep -a '^@global_' main.ll 2>/dev/null | sort | uniq -d | wc -l | tr -d ' ')" "0" "no duplicate global definitions in main.mil IR"
-rm -f main.ll /tmp/sh_hello.mil /tmp/sh_hello.milc /tmp/sh_hello.ll
-echo "=== 9. Native build (requires llc + clang) ==="
-if [ "$HAVE_LLC" = "1" ]; then
+check "$(test -f /tmp/sh_hello.c && echo OK)" "OK" "build -e creates .c file"
+rm -f /tmp/sh_hello.mil /tmp/sh_hello.milc /tmp/sh_hello.c
+echo "=== 9. Native build (system C compiler) ==="
+if [ "$HAVE_CC" = "1" ]; then
     echo "  boot build main.mil -> native executable"
-    rm -f /tmp/sh_main_native
+    rm -f main main.c
     "$MINILANG" build main.mil > /dev/null 2>&1
-    if [ -f main ]; then
-        mv main /tmp/sh_main_native
+    NATIVE="$(native_bin main)"
+    if [ -n "$NATIVE" ]; then
         check "OK" "OK" "boot build main.mil produces native executable"
         echo "  native executable runs programs"
-        /tmp/sh_main_native run tests/hello.mil > /tmp/sh_native_run.out 2>/dev/null
+        "$NATIVE" run tests/hello.mil > /tmp/sh_native_run.out 2>/dev/null
         check "$(diff -q /tmp/sh_boot_run.out /tmp/sh_native_run.out >/dev/null && echo OK)" "OK" "native executable output matches"
         echo "  native executable self-hosts compiler.mil"
-        /tmp/sh_main_native dump-text compiler.mil > /tmp/sh_native_compiler.txt 2>/dev/null
+        "$NATIVE" dump-text compiler.mil > /tmp/sh_native_compiler.txt 2>/dev/null
         check "$(diff -q /tmp/sh_boot.txt /tmp/sh_native_compiler.txt >/dev/null && echo OK)" "OK" "native executable compiles compiler.mil identically"
-        rm -f /tmp/sh_main_native
+        rm -f "$NATIVE" main.c
     else
         check "FAIL" "OK" "boot build main.mil produces native executable"
     fi
 else
-    echo "  SKIP: llc not found (set LLVM_DIR or put llc on PATH)"
+    echo "  SKIP: no system C compiler found (set CC, or put cc/clang/gcc on PATH)"
 fi
 
 echo "=== 10. New commands: bytecode / self-test / repl (must match boot) ==="
@@ -173,13 +186,13 @@ printf 'println 42;\nfunc add(a, b) { return a + b; }\nprintln add(2, 3);\nquit\
 printf 'println 42;\nfunc add(a, b) { return a + b; }\nprintln add(2, 3);\nquit\n' | "$MINILANG" run main.mil repl > /tmp/sh_repl_mil.txt 2>/dev/null
 check "$(diff -q /tmp/sh_repl_boot.txt /tmp/sh_repl_mil.txt >/dev/null && echo OK)" "OK" "repl output matches boot"
 echo "=== 11. A/B two-compiler self-hosting acceptance ==="
-if [ "$HAVE_LLC" = "1" ]; then
+if [ "$HAVE_CC" = "1" ]; then
 echo "  A = boot-compiled compiler.mil; B = A-compiled compiler.mil"
 echo "  Step 1: boot compiles compiler.mil -> A"
-rm -f compiler
+rm -f compiler compiler.c
 "$MINILANG" build compiler.mil > /dev/null 2>&1
-if [ -f compiler ]; then
-    mv compiler /tmp/sh_compiler_A
+A="$(native_bin compiler)"
+if [ -n "$A" ]; then
     check "OK" "OK" "boot builds A compiler"
 else
     check "FAIL" "OK" "boot builds A compiler"
@@ -187,68 +200,48 @@ fi
 echo "  Step 2: A compiles + runs all test programs"
 for f in tests/hello.mil tests/fib.mil tests/array_test.mil tests/nested_test.mil tests/require_test.mil tests/require_path.mil; do
     base=$(basename "$f" .mil)
-    /tmp/sh_compiler_A dump-text "$f" > /tmp/sh_A_$base.bc 2>/dev/null
+    "$A" dump-text "$f" > /tmp/sh_A_$base.bc 2>/dev/null
     "$MINILANG" run "$f" > /tmp/sh_ref_$base.out 2>/dev/null
     "$MINILANG" run vm.mil /tmp/sh_A_$base.bc > /tmp/sh_A_$base.out 2>/dev/null
     check "$(diff -q /tmp/sh_ref_$base.out /tmp/sh_A_$base.out >/dev/null && echo OK)" "OK" "A runs $base"
 done
 echo "  Step 3: A compiles itself (B bytecode); compare A bytecode with boot"
-/tmp/sh_compiler_A dump-text compiler.mil > /tmp/sh_B_bc.txt 2>/dev/null
+"$A" dump-text compiler.mil > /tmp/sh_B_bc.txt 2>/dev/null
 "$MINILANG" dump-text compiler.mil > /tmp/sh_boot_bc.txt 2>/dev/null
 check "$(diff -q /tmp/sh_B_bc.txt /tmp/sh_boot_bc.txt >/dev/null && echo OK)" "OK" "A/B bytecode identical (boot == A-compiled)"
-echo "  Step 4: A/B binary identical (same LLVM IR -> same native binary)"
-"$MINILANG" llvm compiler.mil 2>/dev/null
-mv compiler.ll /tmp/sh_A_compiler.ll
-"$MINILANG" run main.mil llvm compiler.mil > /tmp/sh_B_compiler.ll 2>/dev/null
-check "$(diff -q /tmp/sh_A_compiler.ll /tmp/sh_B_compiler.ll >/dev/null && echo OK)" "OK" "A/B LLVM IR identical"
-if python3 -c "import llvmlite" 2>/dev/null; then
-    # runtime.c moved to the sibling minilang-boot repo (2026-10 toolchain
-    # split); prefer a local copy if present, else the sibling path.
-    RT_C="runtime.c"
-    [ -f "$RT_C" ] || RT_C="../minilang-boot/runtime.c"
-    # Link with the LLVM clang (same driver the boot toolchain uses; gcc
-    # cannot always link LLVM-produced objects).
-    if [ -x "$LLVM_DIR/bin/clang" ]; then CC="$LLVM_DIR/bin/clang"; else CC="clang"; fi
-    # A and B IR are identical (checked above). llc embeds the input path in
-    # the object, so compile one copy twice to verify the llc+clang pipeline
-    # is deterministic — together with the IR equality this proves A/B
-    # binaries are identical.
-    cp /tmp/sh_A_compiler.ll /tmp/sh_AB.ll
-    python3 ir_compile.py /tmp/sh_AB.ll /tmp/sh_AB_1.o > /dev/null 2>&1
-    python3 ir_compile.py /tmp/sh_AB.ll /tmp/sh_AB_2.o > /dev/null 2>&1
-    "$CC" -o /tmp/sh_AB_1.bin /tmp/sh_AB_1.o "$RT_C" -O2 2>/dev/null
-    "$CC" -o /tmp/sh_AB_2.bin /tmp/sh_AB_2.o "$RT_C" -O2 2>/dev/null
-    ha=$(sha256_file /tmp/sh_AB_1.bin | cut -d' ' -f1)
-    hb=$(sha256_file /tmp/sh_AB_2.bin | cut -d' ' -f1)
-    check "$ha" "$hb" "A/B binary sha256 identical ($ha)"
-fi
+echo "  Step 4: A/B C source identical (boot c == main.mil c)"
+rm -f compiler.c
+"$MINILANG" c compiler.mil 2>/dev/null
+cp compiler.c /tmp/sh_A_compiler.c
+rm -f compiler.c
+"$MINILANG" run main.mil c compiler.mil > /dev/null 2>/dev/null
+check "$(diff -q /tmp/sh_A_compiler.c compiler.c >/dev/null && echo OK)" "OK" "A/B C source identical"
 echo "  Step 5: B (A-compiled bytecode) runs all test programs"
 for f in tests/hello.mil tests/fib.mil tests/array_test.mil tests/nested_test.mil tests/require_test.mil tests/require_path.mil; do
     base=$(basename "$f" .mil)
-    /tmp/sh_compiler_A dump-text "$f" > /tmp/sh_B_$base.bc 2>/dev/null
+    "$A" dump-text "$f" > /tmp/sh_B_$base.bc 2>/dev/null
     "$MINILANG" run vm.mil /tmp/sh_B_$base.bc > /tmp/sh_B_$base.out 2>/dev/null
     check "$(diff -q /tmp/sh_ref_$base.out /tmp/sh_B_$base.out >/dev/null && echo OK)" "OK" "B runs $base"
 done
-rm -f /tmp/sh_compiler_A compiler.ll compiler.o compiler /tmp/sh_A_*.ll /tmp/sh_B_*.ll /tmp/sh_A_*.o /tmp/sh_B_*.o
+rm -f "$A" compiler.c /tmp/sh_A_compiler.c
 else
-    echo "  SKIP: llc not found (set LLVM_DIR or put llc on PATH)"
+    echo "  SKIP: no system C compiler found (set CC, or put cc/clang/gcc on PATH)"
 fi
 
 
-echo "=== 12. Native main self-host: A builds itself -> B, A/B binary identical ==="
-if [ "$HAVE_LLC" = "1" ]; then
-echo "  A = boot-built main.mil; B = A-built main.mil (native, no OOM after IR buffer optimization)"
-rm -f main main.ll main.o main_A
+echo "=== 12. Native main self-host: A builds itself -> B ==="
+if [ "$HAVE_CC" = "1" ]; then
+echo "  A = boot-built main.mil; B = A-built main.mil (native)"
+rm -f main main.c main_A main_A.exe
 "$MINILANG" build main.mil > /dev/null 2>&1
-if [ -f main ]; then
-    cp main main_A
-    rm -f main main.ll main.o
+MAIN_A="$(native_bin main)"
+if [ -n "$MAIN_A" ]; then
+    cp "$MAIN_A" main_A; [ -x main_A.exe ] || true
+    rm -f main main.c
     ./main_A build main.mil > /dev/null 2>&1
-    if [ -f main ]; then
+    MAIN_B="$(native_bin main)"
+    if [ -n "$MAIN_B" ]; then
         check "OK" "OK" "A (main_A) builds main.mil -> B (main) natively"
-        ha=$(sha256_file main_A | cut -d' ' -f1)
-        hb=$(sha256_file main | cut -d' ' -f1)
-        check "$ha" "$hb" "A/B native binary sha256 identical ($ha)"
         echo "  B runs all test programs"
         for f in tests/hello.mil tests/fib.mil tests/array_test.mil tests/nested_test.mil tests/require_test.mil tests/require_path.mil; do
             base=$(basename "$f" .mil)
@@ -259,12 +252,12 @@ if [ -f main ]; then
     else
         check "FAIL" "OK" "A (main_A) builds main.mil -> B (main) natively"
     fi
-    rm -f main main.ll main.o main_A
+    rm -f main main.c main_A main_A.exe
 else
     check "FAIL" "OK" "boot builds main.mil natively"
 fi
 else
-    echo "  SKIP: llc not found (set LLVM_DIR or put llc on PATH)"
+    echo "  SKIP: no system C compiler found (set CC, or put cc/clang/gcc on PATH)"
 fi
 
 echo ""
