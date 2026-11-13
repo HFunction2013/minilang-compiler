@@ -58,6 +58,13 @@ if [ "$MSVC" = 1 ]; then
     # argument conversion is disabled; also give cl a native include path.
     export MSYS2_ARG_CONV_EXCL="*"
     BOOT_DIR="$(cygpath -m "$BOOT_DIR" 2>/dev/null || echo "$BOOT_DIR")"
+    # A Windows DLL cannot resolve host helpers from the loaded executable the
+    # way ELF/dlopen does; link against the boot exe's import library. The DLL
+    # always loads into the boot minilang.exe process, so its recorded module
+    # name matches at runtime.
+    _exe_dir="$(cd "$(dirname "$MINILANG")" && pwd)"
+    _exe_stem="$(basename "$MINILANG")"; _exe_stem="${_exe_stem%.*}"
+    IMPLIB="$(cygpath -m "$_exe_dir/$_exe_stem.lib" 2>/dev/null || echo "$_exe_dir/$_exe_stem.lib")"
 fi
 
 check() {
@@ -72,7 +79,7 @@ check() {
 echo "=== Precompile extension C (no on-the-fly compilation by minilang) ==="
 if [ "$MSVC" = 1 ]; then
     "$EXT_CC" /O2 /I"$BOOT_DIR" /c "$EXTC" /Fo"$OBJ"
-    "$EXT_CC" /O2 /I"$BOOT_DIR" /LD "$EXTC" /Fe"$SO"
+    "$EXT_CC" /O2 /I"$BOOT_DIR" /LD "$EXTC" "$IMPLIB" /Fe"$SO"
 else
     "$EXT_CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
     # Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
