@@ -40,7 +40,13 @@ check() {
 
 echo "=== Precompile extension C (no on-the-fly compilation by minilang) ==="
 "$CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
-"$CC" -O2 -fPIC -shared -I"$BOOT_DIR" "$EXTC" -o "$SO"
+# Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
+# macOS needs `-dynamiclib` and allows undefined symbols resolved at dlopen.
+case "$(uname -s)" in
+    Darwin) SHARED_FLAGS="-dynamiclib -undefined dynamic_lookup" ;;
+    *)      SHARED_FLAGS="-shared" ;;
+esac
+"$CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" -o "$SO"
 echo "  object: $OBJ ; shared library: $SO"
 
 run_one() {
