@@ -9,8 +9,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            cc: gcc
+          - os: ubuntu-latest
+            cc: clang
+          - os: ubuntu-latest
+            cc: g++
+          - os: macos-latest
+            cc: clang
+          - os: windows-latest
+            cc: clang
     runs-on: ${{ matrix.os }}
+    env:
+      CC: ${{ matrix.cc }}
     steps:
       - name: Checkout compiler
         uses: actions/checkout@v4
@@ -24,11 +36,11 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
           path: minilang-boot
 
-      - name: Install C toolchain + make (Ubuntu)
+      - name: Install C toolchain (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential make
+          sudo apt-get install -y build-essential make clang g++
 
       - name: Build boot compiler (Unix)
         if: runner.os != 'Windows'
@@ -41,11 +53,6 @@ jobs:
         shell: bash
         run: cmake -B build && cmake --build build --config Release
 
-      - name: Add boot binary to PATH (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: echo "${{ github.workspace }}/minilang-boot" >> $GITHUB_PATH
-
       - name: Full test suite (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -53,28 +60,17 @@ jobs:
           MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG_DIR: ${{ github.workspace }}
-        run: |
-          set -e
-          bash vm_test.sh
-          bash bootstrap_test.sh
-          bash full_selfhost_test.sh
-          bash ext_test.sh
-          echo "=== every tests/*.mil through the boot VM ==="
-          for f in tests/*.mil; do
-            echo "--- $f ---"
-            minilang run "$f"
-          done
+          CC: ${{ matrix.cc }}
+        run: bash full_test.sh
 
-      - name: VM smoke over tests/*.mil (Windows)
+      - name: Full test suite (Windows)
         if: runner.os == 'Windows'
         shell: bash
         env:
           MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/build/Release/minilang.exe
           MINILANG_DIR: ${{ github.workspace }}
-        run: |
-          set -e
-          BIN=minilang-boot/build/Release/minilang.exe
-          for f in tests/*.mil; do
-            echo "--- $f ---"
-            "$BIN" run "$f"
-          done
+          CC: ${{ matrix.cc }}
+          # Shared-library precompile model on Windows still uses the Unix
+          # .so flags; skip that one suite until the Windows DLL path lands.
+          SKIP_EXT: 1
+        run: bash full_test.sh

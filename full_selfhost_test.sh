@@ -52,10 +52,18 @@ check() {
     fi
 }
 # Resolve the native executable name produced for a stem (Unix stem, Windows stem.exe).
+# Return a ./-prefixed relative path (or absolute path as-is): a bare name is not
+# found via PATH when the cwd is not on PATH, which would exit 127.
 native_bin() {
-    if [ -x "$1" ]; then echo "$1";
-    elif [ -x "$1.exe" ]; then echo "$1.exe";
-    else echo ""; fi
+    local bin="$1" rel
+    if [ -x "$bin" ]; then
+        case "$bin" in /*) echo "$bin" ;; *) echo "./$bin" ;; esac
+    elif [ -x "$bin.exe" ]; then
+        rel="$bin.exe"
+        case "$rel" in /*) echo "$rel" ;; *) echo "./$rel" ;; esac
+    else
+        echo ""
+    fi
 }
 
 echo "=== 1. compiler.mil self-hosting (compiles itself) ==="
