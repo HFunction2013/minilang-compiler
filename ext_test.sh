@@ -53,6 +53,12 @@ BOOT_DIR="$(cd "$(dirname "$MINILANG")" && pwd)"
 while [ ! -f "$BOOT_DIR/minilang_runtime.h" ] && [ "$BOOT_DIR" != "/" ]; do
     BOOT_DIR="$(cd "$BOOT_DIR/.." && pwd)"
 done
+if [ "$MSVC" = 1 ]; then
+    # Git Bash rewrites cl's `/O2` `/I` `/Fo` switches as POSIX paths unless
+    # argument conversion is disabled; also give cl a native include path.
+    export MSYS2_ARG_CONV_EXCL="*"
+    BOOT_DIR="$(cygpath -m "$BOOT_DIR" 2>/dev/null || echo "$BOOT_DIR")"
+fi
 
 check() {
     if [ "$1" = "$2" ]; then
