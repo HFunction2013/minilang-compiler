@@ -32,6 +32,14 @@ case "$CC_BASE" in
     cl|cl.exe) MSVC=1 ;;
     *)         MSVC=0 ;;
 esac
+# Extension sources are plain C. A C++ driver (g++/clang++) would mangle the
+# ml_native_* entry points the loader looks up by unmangled name, so precompile
+# them with the matching C driver instead.
+case "$CC_BASE" in
+    g++)       EXT_CC=gcc ;;
+    clang++|c++) EXT_CC=clang ;;
+    *)         EXT_CC=$CC ;;
+esac
 case "$UNAME_S" in
     Darwin)        SO=$EXT_DIR/file_counter.dylib; SHARED_FLAGS="-dynamiclib -undefined dynamic_lookup" ;;
     MINGW*|MSYS*|*NT*) SO=$EXT_DIR/file_counter.dll ;;
@@ -52,13 +60,13 @@ check() {
 
 echo "=== Precompile extension C (no on-the-fly compilation by minilang) ==="
 if [ "$MSVC" = 1 ]; then
-    "$CC" /O2 /I"$BOOT_DIR" /c "$EXTC" /Fo"$OBJ"
-    "$CC" /O2 /I"$BOOT_DIR" /LD "$EXTC" /Fe"$SO"
+    "$EXT_CC" /O2 /I"$BOOT_DIR" /c "$EXTC" /Fo"$OBJ"
+    "$EXT_CC" /O2 /I"$BOOT_DIR" /LD "$EXTC" /Fe"$SO"
 else
-    "$CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
+    "$EXT_CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
     # Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
     # macOS needs `-dynamiclib` and allows undefined symbols resolved at dlopen.
-    "$CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" -o "$SO"
+    "$EXT_CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" -o "$SO"
 fi
 echo "  object: $OBJ ; shared library: $SO"
 
