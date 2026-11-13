@@ -49,6 +49,10 @@ check() {
     else
         echo "  FAIL: $3"
         FAIL=$((FAIL + 1))
+        if [ -n "${4:-}" ] && [ -f "$4" ]; then
+            echo "  --- actual ($4) ---"; cat "$4"
+            echo "  --- expected ---"; echo "$2"
+        fi
     fi
 }
 # Resolve the native executable name produced for a stem (Unix stem, Windows stem.exe).
@@ -140,7 +144,7 @@ func main() {
 MILEOF
 "$MINILANG" run main.mil run /tmp/sh_args.mil hello world > /tmp/sh_args.out 2>/dev/null
 echo -e "3\n/tmp/sh_args.mil\nhello\nworld" > /tmp/sh_args_expected.txt
-check "$(diff -q /tmp/sh_args_expected.txt /tmp/sh_args.out >/dev/null && echo OK)" "OK" "program arguments correct"
+check "$(diff -q /tmp/sh_args_expected.txt /tmp/sh_args.out >/dev/null && echo OK)" "OK" "program arguments correct" /tmp/sh_args.out
 echo "=== 8. build command ==="
 echo "  build -b: compile to .milc bytecode file"
 rm -f /tmp/sh_hello.milc
@@ -285,11 +289,11 @@ func main() {
 EOF
 EXPECTED=$(printf '5\nhi!\n')
 (cd "$TMPMOD/sub" && "$MIL_ABS" run prog.mil > /tmp/sh_mod_sub.out 2>&1)
-check "$(cat /tmp/sh_mod_sub.out)" "$EXPECTED" "require resolves from the script directory"
+check "$(cat /tmp/sh_mod_sub.out)" "$EXPECTED" "require resolves from the script directory" /tmp/sh_mod_sub.out
 (cd / && "$MIL_ABS" run "$TMPMOD/sub/prog.mil" > /tmp/sh_mod_root.out 2>&1)
-check "$(cat /tmp/sh_mod_root.out)" "$EXPECTED" "require resolves from /"
+check "$(cat /tmp/sh_mod_root.out)" "$EXPECTED" "require resolves from /" /tmp/sh_mod_root.out
 (cd "$TMPMOD" && "$MIL_ABS" run "$REPO/main.mil" run "$TMPMOD/sub/prog.mil" > /tmp/sh_mod_mil.out 2>&1)
-check "$(cat /tmp/sh_mod_mil.out)" "$EXPECTED" "mil-side main.mil resolves syslib too"
+check "$(cat /tmp/sh_mod_mil.out)" "$EXPECTED" "mil-side main.mil resolves syslib too" /tmp/sh_mod_mil.out
 rm -rf "$TMPMOD"
 
 echo ""
