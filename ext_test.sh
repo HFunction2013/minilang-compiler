@@ -46,8 +46,13 @@ case "$UNAME_S" in
     *)             SO=$EXT_DIR/file_counter.so;    SHARED_FLAGS="-shared" ;;
 esac
 
-# Boot include dir for minilang_runtime.h: sibling minilang-boot repo.
+# Boot include dir for minilang_runtime.h: sibling minilang-boot repo. The exe
+# may live in build/Release (cmake/MSVC) or the repo root (make), so walk up
+# until the runtime header is found.
 BOOT_DIR="$(cd "$(dirname "$MINILANG")" && pwd)"
+while [ ! -f "$BOOT_DIR/minilang_runtime.h" ] && [ "$BOOT_DIR" != "/" ]; do
+    BOOT_DIR="$(cd "$BOOT_DIR/.." && pwd)"
+done
 
 check() {
     if [ "$1" = "$2" ]; then
