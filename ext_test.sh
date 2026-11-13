@@ -23,8 +23,20 @@ EXT_DIR=tests/ext
 PROG=$EXT_DIR/opaque_test.mil
 EXTC=$EXT_DIR/file_counter.c
 OBJ=$EXT_DIR/file_counter.o
-SO=$EXT_DIR/file_counter.so
 BIN=$EXT_DIR/opaque_test
+
+# Shared-library artifact and link flags depend on platform and driver.
+UNAME_S="$(uname -s)"
+CC_BASE="$(basename "$CC")"
+case "$CC_BASE" in
+    cl|cl.exe) MSVC=1 ;;
+    *)         MSVC=0 ;;
+esac
+case "$UNAME_S" in
+    Darwin)        SO=$EXT_DIR/file_counter.dylib; SHARED_FLAGS="-dynamiclib -undefined dynamic_lookup" ;;
+    MINGW*|MSYS*|*NT*) SO=$EXT_DIR/file_counter.dll ;;
+    *)             SO=$EXT_DIR/file_counter.so;    SHARED_FLAGS="-shared" ;;
+esac
 
 # Boot include dir for minilang_runtime.h: sibling minilang-boot repo.
 BOOT_DIR="$(cd "$(dirname "$MINILANG")" && pwd)"
@@ -39,14 +51,15 @@ check() {
 }
 
 echo "=== Precompile extension C (no on-the-fly compilation by minilang) ==="
-"$CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
-# Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
-# macOS needs `-dynamiclib` and allows undefined symbols resolved at dlopen.
-case "$(uname -s)" in
-    Darwin) SHARED_FLAGS="-dynamiclib -undefined dynamic_lookup" ;;
-    *)      SHARED_FLAGS="-shared" ;;
-esac
-"$CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" -o "$SO"
+if [ "$MSVC" = 1 ]; then
+    "$CC" /O2 /I"$BOOT_DIR" /c "$EXTC" /Fo"$OBJ"
+    "$CC" /O2 /I"$BOOT_DIR" /LD "$EXTC" /Fe"$SO"
+else
+    "$CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
+    # Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
+    # macOS needs `-dynamiclib` and allows undefined symbols resolved at dlopen.
+    "$CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" -o "$SO"
+fi
 echo "  object: $OBJ ; shared library: $SO"
 
 run_one() {

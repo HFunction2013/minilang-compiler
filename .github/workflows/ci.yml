@@ -12,6 +12,8 @@ jobs:
         include:
           - os: ubuntu-latest
             cc: gcc
+          - os: ubuntu-latest
+            cc: g++
           - os: macos-latest
             cc: clang
           - os: windows-latest
@@ -36,7 +38,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential make
+          sudo apt-get install -y build-essential make g++
 
       - name: Set up MSVC developer environment (Windows)
         if: runner.os == 'Windows'
@@ -70,7 +72,4 @@ jobs:
           MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/build/Release/minilang.exe
           MINILANG_DIR: ${{ github.workspace }}
           CC: ${{ matrix.cc }}
-          # Shared-library precompile is still a Unix .so path; the Windows
-          # DLL extension suite is skipped until that lands.
-          SKIP_EXT: 1
         run: bash full_test.sh
