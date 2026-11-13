@@ -65,13 +65,15 @@ echo "  object: $OBJ ; shared library: $SO"
 run_one() {
     local name="$1" exe="$2"
     echo "--- $name (build -e, link precompiled object) ---"
-    rm -f "$BIN" "$BIN".c
+    rm -f "$BIN" "$BIN.exe" "$BIN".c
     # Note: `$exe` intentionally unquoted so a compound launcher like
     # "$MINILANG run main.mil" splits into the interpreter + entry file.
     $exe build -e "$PROG" "$OBJ" > /dev/null 2>&1 || { echo "  FAIL: build ($name)"; exit 1; }
-    [ -x "$BIN" ] || { echo "  FAIL: no executable produced ($name)"; exit 1; }
+    local BINRUN="$BIN"
+    if [ ! -x "$BINRUN" ]; then BINRUN="$BIN.exe"; fi
+    [ -x "$BINRUN" ] || { echo "  FAIL: no executable produced ($name)"; exit 1; }
     local out
-    out=$("$BIN" "$PROG")
+    out=$("$BINRUN" "$PROG")
     local same opaque lines truthy
     same=$(echo "$out" | sed -n 's/^same handle: //p')
     opaque=$(echo "$out" | sed -n 's/^opaque value: //p')
