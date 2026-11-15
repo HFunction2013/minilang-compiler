@@ -32,12 +32,11 @@ case "$UNAME_S" in
     MINGW*|MSYS*|*NT*) WIN=1 ;;
     *)                  WIN=0 ;;
 esac
-# On Windows the LLVM/VS-bundled clang targets the MSVC ABI and speaks the
-# /LD /O2 /Fe dialect, so group it with MSVC. cl is MSVC everywhere.
+# Only cl/cl.exe speaks the MSVC slash dialect. Plain clang.exe (even when
+# targeting the MSVC ABI) and MinGW g++ use the dash -O2 -I -o dialect.
 case "$CC_BASE" in
-    cl|cl.exe)                       MSVC=1 ;;
-    clang|clang.exe|clang++|clang++.exe) [ "$WIN" = 1 ] && MSVC=1 || MSVC=0 ;;
-    *)                               MSVC=0 ;;
+    cl|cl.exe) MSVC=1 ;;
+    *)         MSVC=0 ;;
 esac
 # Extension sources are plain C. A C++ driver (g++/clang++) would mangle the
 # ml_native_* entry points the loader looks up by unmangled name, so precompile
@@ -91,13 +90,16 @@ if [ "$MSVC" = 1 ]; then
     "$EXT_CC" /O2 /I"$BOOT_DIR" /c "$EXTC" /Fo"$OBJ"
     "$EXT_CC" /O2 /I"$BOOT_DIR" /LD "$EXTC" "$IMPLIB" /Fe"$SO"
 else
-    "$EXT_CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
+    # -fPIC is a no-op on MinGW and rejected by the windows-msvc clang target,
+    # so omit it on Windows.
+    PIC="-fPIC"; [ "$WIN" = 1 ] && PIC=""
+    "$EXT_CC" -O2 $PIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
     # Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
     # macOS needs `-dynamiclib` and allows undefined symbols resolved at dlopen.
     # On Windows also link the boot exe import library for the host helpers.
     IMPLIB_ARG=""
     [ "$WIN" = 1 ] && IMPLIB_ARG="$IMPLIB"
-    "$EXT_CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" $IMPLIB_ARG -o "$SO"
+    "$EXT_CC" -O2 $PIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" $IMPLIB_ARG -o "$SO"
 fi
 echo "  object: $OBJ ; shared library: $SO"
 
