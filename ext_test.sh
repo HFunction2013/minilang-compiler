@@ -67,7 +67,13 @@ done
 if [ "$WIN" = 1 ]; then
     _exe_dir="$(cd "$(dirname "$MINILANG")" && pwd)"
     _exe_stem="$(basename "$MINILANG")"; _exe_stem="${_exe_stem%.*}"
-    IMPLIB="$(cygpath -m "$_exe_dir/$_exe_stem.lib" 2>/dev/null || echo "$_exe_dir/$_exe_stem.lib")"
+    if [ -f "$_exe_dir/$_exe_stem.lib" ]; then
+        IMPLIB="$(cygpath -m "$_exe_dir/$_exe_stem.lib" 2>/dev/null || echo "$_exe_dir/$_exe_stem.lib")"
+    elif [ -f "$_exe_dir/lib$_exe_stem.dll.a" ]; then
+        IMPLIB="$(cygpath -m "$_exe_dir/lib$_exe_stem.dll.a" 2>/dev/null || echo "$_exe_dir/lib$_exe_stem.dll.a")"
+    else
+        IMPLIB=""
+    fi
 fi
 if [ "$MSVC" = 1 ]; then
     # Git Bash rewrites cl's `/O2` `/I` `/Fo` switches as POSIX paths unless

@@ -23,13 +23,15 @@ jobs:
             cc: clang
           - os: macos-latest
             cc: g++-15
-          # Windows: MSVC cl and the LLVM clang (MSVC ABI target). MinGW g++
-          # is deferred: its extension DLL needs the host exe's MinGW import
-          # library, which the CMake build does not yet emit; tracked in #6.
+          # Windows: MSVC cl, the LLVM clang (MSVC ABI target), and MinGW g++.
+          # The boot exe itself is built by the VS generator and emits
+          # minilang.lib; the MinGW extension DLL links that import library.
           - os: windows-latest
             cc: cl
           - os: windows-latest
             cc: clang
+          - os: windows-latest
+            cc: g++
     runs-on: ${{ matrix.os }}
     env:
       CC: ${{ matrix.cc }}
