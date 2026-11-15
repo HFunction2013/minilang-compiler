@@ -36,9 +36,10 @@ esac
 # ml_native_* entry points the loader looks up by unmangled name, so precompile
 # them with the matching C driver instead.
 case "$CC_BASE" in
-    g++)       EXT_CC=gcc ;;
-    clang++|c++) EXT_CC=clang ;;
-    *)         EXT_CC=$CC ;;
+    g++*)       EXT_CC="gcc${CC_BASE#g++}" ;;
+    clang++*)   EXT_CC="clang${CC_BASE#clang++}" ;;
+    c++)        EXT_CC=clang ;;
+    *)          EXT_CC=$CC ;;
 esac
 case "$UNAME_S" in
     Darwin)        SO=$EXT_DIR/file_counter.dylib; SHARED_FLAGS="-dynamiclib -undefined dynamic_lookup" ;;
@@ -130,6 +131,16 @@ check "$(echo "$out" | sed -n 's/^same handle: //p')" "0" "self-hosted run -e: t
 check "$(echo "$out" | sed -n 's/^opaque value: //p')" "<opaque>" "self-hosted run -e: opaque prints as <opaque>"
 check "$(echo "$out" | sed -n 's/^line count: //p')" "50" "self-hosted run -e: extension counts lines via opaque FILE*"
 check "$(echo "$out" | sed -n 's/^truthy: //p')" "1" "self-hosted run -e: non-NULL opaque is truthy"
+
+echo ""
+echo "=== genheader / compileheader roundtrip ==="
+HDR_MIL=$EXT_DIR/header_test.mil
+HDR_SO=$EXT_DIR/header_test.${SO##*.}
+"$MINILANG" genheader "$HDR_MIL" || { echo "  FAIL: genheader"; exit 1; }
+"$MINILANG" compileheader "$HDR_MIL" || { echo "  FAIL: compileheader"; exit 1; }
+out=$("$MINILANG" run -e "$HDR_MIL" "$HDR_SO" -- "$HDR_MIL" 2>&1) || { echo "  [header run -e exited non-zero]"; echo "$out"; }
+check "$(echo "$out" | sed -n 's/^ping=//p')" "nil" "genheader stub ping returns nil"
+check "$(echo "$out" | sed -n 's/^echo=//p')" "nil" "genheader stub echo returns nil"
 
 echo ""
 echo "=== Reject raw .c extension sources ==="

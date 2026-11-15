@@ -1,9 +1,13 @@
 *.o
 *.so
+*.dylib
+*.dll
 *.milc
-# Generated C sources and native executables produced by `build -e` / `c`
+# Generated C sources, headers and native executables produced by
+# `build -e` / `c` / `genheader` / `compileheader`
 tests/*.c
 tests/ext/*.c
+tests/ext/*.h
 /main
 /minilang
 /compiler

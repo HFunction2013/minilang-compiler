@@ -1,0 +1,15 @@
+// header_test.mil — roundtrip for `genheader` / `compileheader`.
+//
+// `genheader` reads these `native func` declarations and emits a paired C
+// header + stub source; `compileheader` precompiles that stub into a shared
+// library. The generated stubs return nil, so this only verifies the produced
+// library loads and its entry points resolve through the packed ABI.
+
+native func hdr_ping();
+native func hdr_echo(x);
+
+func main() {
+    println "ping=" + toString(hdr_ping());
+    println "echo=" + toString(hdr_echo(7));
+    return 0;
+}

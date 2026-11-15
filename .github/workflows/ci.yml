@@ -10,14 +10,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux: GNU gcc, GNU C++ driver (g++), and clang.
           - os: ubuntu-latest
             cc: gcc
           - os: ubuntu-latest
             cc: g++
+          - os: ubuntu-latest
+            cc: clang
+          # macOS: Apple/LLVM clang and Homebrew GCC (versioned alias g++-15).
+          # MSVC/cl is Windows-only and has no macOS build.
           - os: macos-latest
             cc: clang
+          - os: macos-latest
+            cc: g++-15
+          # Windows: MSVC cl, LLVM clang, and MinGW g++.
           - os: windows-latest
             cc: cl
+          - os: windows-latest
+            cc: clang
+          - os: windows-latest
+            cc: g++
     runs-on: ${{ matrix.os }}
     env:
       CC: ${{ matrix.cc }}
@@ -38,7 +50,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential make g++
+          sudo apt-get install -y build-essential make g++ clang
 
       - name: Set up MSVC environment (Windows, self-contained)
         if: runner.os == 'Windows'
@@ -69,7 +81,7 @@ jobs:
           CC: ${{ matrix.cc }}
         run: bash full_test.sh
 
-      - name: Full test suite (Windows, MSVC)
+      - name: Full test suite (Windows)
         if: runner.os == 'Windows'
         shell: bash
         env:
