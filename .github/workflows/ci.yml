@@ -23,13 +23,13 @@ jobs:
             cc: clang
           - os: macos-latest
             cc: g++-15
-          # Windows: MSVC cl, LLVM clang, and MinGW g++.
+          # Windows: MSVC cl and the LLVM clang (MSVC ABI target). MinGW g++
+          # is deferred: its extension DLL needs the host exe's MinGW import
+          # library, which the CMake build does not yet emit; tracked in #6.
           - os: windows-latest
             cc: cl
           - os: windows-latest
             cc: clang
-          - os: windows-latest
-            cc: g++
     runs-on: ${{ matrix.os }}
     env:
       CC: ${{ matrix.cc }}

@@ -28,9 +28,16 @@ BIN=$EXT_DIR/opaque_test
 # Shared-library artifact and link flags depend on platform and driver.
 UNAME_S="$(uname -s)"
 CC_BASE="$(basename "$CC")"
+case "$UNAME_S" in
+    MINGW*|MSYS*|*NT*) WIN=1 ;;
+    *)                  WIN=0 ;;
+esac
+# On Windows the LLVM/VS-bundled clang targets the MSVC ABI and speaks the
+# /LD /O2 /Fe dialect, so group it with MSVC. cl is MSVC everywhere.
 case "$CC_BASE" in
-    cl|cl.exe) MSVC=1 ;;
-    *)         MSVC=0 ;;
+    cl|cl.exe)                       MSVC=1 ;;
+    clang|clang.exe|clang++|clang++.exe) [ "$WIN" = 1 ] && MSVC=1 || MSVC=0 ;;
+    *)                               MSVC=0 ;;
 esac
 # Extension sources are plain C. A C++ driver (g++/clang++) would mangle the
 # ml_native_* entry points the loader looks up by unmangled name, so precompile
@@ -43,7 +50,7 @@ case "$CC_BASE" in
 esac
 case "$UNAME_S" in
     Darwin)        SO=$EXT_DIR/file_counter.dylib; SHARED_FLAGS="-dynamiclib -undefined dynamic_lookup" ;;
-    MINGW*|MSYS*|*NT*) SO=$EXT_DIR/file_counter.dll ;;
+    MINGW*|MSYS*|*NT*) SO=$EXT_DIR/file_counter.dll; SHARED_FLAGS="-shared" ;;
     *)             SO=$EXT_DIR/file_counter.so;    SHARED_FLAGS="-shared" ;;
 esac
 
@@ -54,18 +61,20 @@ BOOT_DIR="$(cd "$(dirname "$MINILANG")" && pwd)"
 while [ ! -f "$BOOT_DIR/minilang_runtime.h" ] && [ "$BOOT_DIR" != "/" ]; do
     BOOT_DIR="$(cd "$BOOT_DIR/.." && pwd)"
 done
+# A Windows DLL cannot resolve host helpers from the loaded executable the way
+# ELF/dlopen does; link against the boot exe's import library. The DLL always
+# loads into the boot minilang.exe process, so its recorded module name matches
+# at runtime. Needed by both MSVC and MinGW drivers.
+if [ "$WIN" = 1 ]; then
+    _exe_dir="$(cd "$(dirname "$MINILANG")" && pwd)"
+    _exe_stem="$(basename "$MINILANG")"; _exe_stem="${_exe_stem%.*}"
+    IMPLIB="$(cygpath -m "$_exe_dir/$_exe_stem.lib" 2>/dev/null || echo "$_exe_dir/$_exe_stem.lib")"
+fi
 if [ "$MSVC" = 1 ]; then
     # Git Bash rewrites cl's `/O2` `/I` `/Fo` switches as POSIX paths unless
     # argument conversion is disabled; also give cl a native include path.
     export MSYS2_ARG_CONV_EXCL="*"
     BOOT_DIR="$(cygpath -m "$BOOT_DIR" 2>/dev/null || echo "$BOOT_DIR")"
-    # A Windows DLL cannot resolve host helpers from the loaded executable the
-    # way ELF/dlopen does; link against the boot exe's import library. The DLL
-    # always loads into the boot minilang.exe process, so its recorded module
-    # name matches at runtime.
-    _exe_dir="$(cd "$(dirname "$MINILANG")" && pwd)"
-    _exe_stem="$(basename "$MINILANG")"; _exe_stem="${_exe_stem%.*}"
-    IMPLIB="$(cygpath -m "$_exe_dir/$_exe_stem.lib" 2>/dev/null || echo "$_exe_dir/$_exe_stem.lib")"
 fi
 
 check() {
@@ -85,7 +94,10 @@ else
     "$EXT_CC" -O2 -fPIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
     # Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
     # macOS needs `-dynamiclib` and allows undefined symbols resolved at dlopen.
-    "$EXT_CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" -o "$SO"
+    # On Windows also link the boot exe import library for the host helpers.
+    IMPLIB_ARG=""
+    [ "$WIN" = 1 ] && IMPLIB_ARG="$IMPLIB"
+    "$EXT_CC" -O2 -fPIC $SHARED_FLAGS -I"$BOOT_DIR" "$EXTC" $IMPLIB_ARG -o "$SO"
 fi
 echo "  object: $OBJ ; shared library: $SO"
 
