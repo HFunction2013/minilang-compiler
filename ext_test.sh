@@ -99,7 +99,13 @@ else
     # -fPIC is a no-op on MinGW and rejected by the windows-msvc clang target,
     # so omit it on Windows.
     PIC="-fPIC"; [ "$WIN" = 1 ] && PIC=""
-    "$EXT_CC" -O2 $PIC -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
+    # This object is linked straight into a native executable together with
+    # runtime.c, so compile it against the plain (non-dllimport) host helpers.
+    # Without MINILANG_EXPORTS the header marks MINI_API dllimport, emitting
+    # __imp_* references that MinGW ld does not synthesize from the in-exe
+    # definitions (MSVC link.exe does). The shared library below recompiles
+    # the source separately, so this flag affects the object/exe path only.
+    "$EXT_CC" -O2 $PIC -DMINILANG_EXPORTS -I"$BOOT_DIR" -c "$EXTC" -o "$OBJ"
     # Shared-library link flags differ by platform: Linux/MinGW use `-shared`;
     # macOS needs `-dynamiclib` and allows undefined symbols resolved at dlopen.
     # On Windows also link the boot exe import library for the host helpers.
