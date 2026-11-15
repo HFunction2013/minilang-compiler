@@ -23,14 +23,15 @@ jobs:
             cc: clang
           - os: macos-latest
             cc: g++-15
-          # Windows: MSVC cl and the LLVM clang (MSVC ABI target). MinGW g++
-          # is deferred: the VS-built host exe emits an MSVC .lib that MinGW ld
-          # cannot consume; it needs a MinGW-built host exe with a GNU import
-          # lib (libminilang.dll.a). Tracked in #7.
+          # Windows: MSVC cl, the LLVM clang (MSVC ABI target), and MinGW g++.
+          # The g++ job builds the boot host with the MinGW/Ninja toolchain so it
+          # emits a GNU libminilang.dll.a import library for the extension DLL.
           - os: windows-latest
             cc: cl
           - os: windows-latest
             cc: clang
+          - os: windows-latest
+            cc: g++
     runs-on: ${{ matrix.os }}
     env:
       CC: ${{ matrix.cc }}
@@ -66,11 +67,22 @@ jobs:
         working-directory: minilang-boot
         run: make
 
-      - name: Build boot compiler (Windows, MSVC)
+      - name: Build boot compiler (Windows)
         if: runner.os == 'Windows'
         working-directory: minilang-boot
         shell: bash
-        run: cmake -B build && cmake --build build --config Release
+        run: |
+          BOOT_WS="${{ github.workspace }}/minilang-boot"
+          if [ "$CC" = "g++" ]; then
+            # MinGW host: Ninja + gcc, so the linker emits a GNU import library
+            # (libminilang.dll.a) the MinGW extension DLL can consume.
+            cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc
+            cmake --build build
+            echo "MINILANG_BOOT=$BOOT_WS/build/minilang.exe" >> "$GITHUB_ENV"
+          else
+            cmake -B build && cmake --build build --config Release
+            echo "MINILANG_BOOT=$BOOT_WS/build/Release/minilang.exe" >> "$GITHUB_ENV"
+          fi
 
       - name: Full test suite (Unix)
         if: runner.os != 'Windows'
@@ -86,7 +98,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         env:
-          MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/build/Release/minilang.exe
+          MINILANG_BOOT: ${{ env.MINILANG_BOOT }}
           MINILANG_DIR: ${{ github.workspace }}
           CC: ${{ matrix.cc }}
         run: bash full_test.sh
