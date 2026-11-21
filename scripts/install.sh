@@ -152,6 +152,14 @@ fi
 [ -z "$DOC_SOURCE" ]     && fetch_repo "$DOC_REPO"     document DOC_SOURCE
 [ -z "$SYS_SOURCE" ]     && fetch_repo "$SYS_REPO"     syslib  SYS_SOURCE
 
+# The test suite resolves the standard library from $COMPILER_SOURCE/syslib
+# (MINILANG_DIR/syslib). A plain clone/archive omits the syslib submodule, so
+# stage the fetched syslib into the source tree when it has none of its own.
+if [ -f "$SYS_SOURCE/builtin.mil" ] && [ ! -f "$COMPILER_SOURCE/syslib/builtin.mil" ]; then
+    mkdir -p "$COMPILER_SOURCE/syslib"
+    cp "$SYS_SOURCE"/*.mil "$COMPILER_SOURCE/syslib/"
+fi
+
 [ -f "$BOOT_SOURCE/main.c" ]     || die "boot source not found ($BOOT_SOURCE)"
 [ -f "$COMPILER_SOURCE/main.mil" ]|| die "compiler source not found ($COMPILER_SOURCE)"
 

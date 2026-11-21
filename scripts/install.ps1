@@ -45,7 +45,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = $PSScriptRoot
 $RepoRoot  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 
 function Log($m) { Write-Host "[install] $m" }
@@ -121,6 +121,15 @@ if (-not $SysSource)      { $SysSource     = Fetch-Repo $SysRepo     'syslib' }
 
 if (-not (Test-Path (Join-Path $BootSource 'main.c')))      { Die "boot source not found ($BootSource)" }
 if (-not (Test-Path (Join-Path $CompilerSource 'main.mil'))){ Die "compiler source not found ($CompilerSource)" }
+
+# Stage the fetched syslib into the compiler source tree: the test suite
+# resolves syslib from MINILANG_DIR/syslib, and a plain clone/archive omits the
+# submodule.
+$sysTarget = Join-Path $CompilerSource 'syslib'
+if ((Test-Path (Join-Path $SysSource 'builtin.mil')) -and -not (Test-Path (Join-Path $sysTarget 'builtin.mil'))) {
+    New-Item -ItemType Directory -Force -Path $sysTarget | Out-Null
+    Get-ChildItem -Path $SysSource -Filter '*.mil' -File | Copy-Item -Destination $sysTarget -Force
+}
 
 # ---- 2. Compile the boot VM on site (CMake/Release) ----
 if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { Die 'cmake not found on PATH' }
