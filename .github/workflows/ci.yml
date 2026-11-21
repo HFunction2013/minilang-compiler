@@ -185,3 +185,130 @@ jobs:
             '}'
           )
           minilang.cmd run smoke.mil
+
+  # Pure-fetch smoke: no sibling checkout on the runner. The installer script is
+  # staged in a temp dir outside any source tree, so it must fetch every repo
+  # itself (git clone fallback) and still lay down a working prefix.
+  install-fetch:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout compiler (script only)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install GNU toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make g++ clang
+
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSPATH=%%i"
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set >> "%GITHUB_ENV%"
+
+      - name: Stage standalone installer (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p "$RUNNER_TEMP/standalone/scripts"
+          cp scripts/install.sh "$RUNNER_TEMP/standalone/scripts/"
+
+      - name: Stage standalone installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/standalone/scripts" | Out-Null
+          Copy-Item scripts/install.ps1 "$env:RUNNER_TEMP/standalone/scripts/"
+
+      - name: Run installer (pure fetch, Unix)
+        if: runner.os != 'Windows'
+        env:
+          MINILANG_PREFIX: ${{ github.workspace }}/ml-fetch-prefix
+        run: bash "$RUNNER_TEMP/standalone/scripts/install.sh"
+
+      - name: Run installer (pure fetch, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          MINILANG_PREFIX: ${{ github.workspace }}\ml-fetch-prefix
+        run: |
+          & "$env:RUNNER_TEMP\standalone\scripts\install.ps1" -Prefix "$env:MINILANG_PREFIX"
+
+      - name: Verify installed command (Unix)
+        if: runner.os != 'Windows'
+        env:
+          PREFIX: ${{ github.workspace }}/ml-fetch-prefix
+        run: |
+          export PATH="$PREFIX/bin:$PATH"
+          cat > smoke.mil <<'EOF'
+          func main() {
+              println "fetched OK";
+              return 0;
+          }
+          EOF
+          minilang run smoke.mil
+
+      - name: Verify installed command (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PREFIX: ${{ github.workspace }}\ml-fetch-prefix
+        run: |
+          $env:Path = "$env:PREFIX\bin;$env:Path"
+          Set-Content -Path smoke.mil -Value @(
+            'func main() {',
+            '    println "fetched OK";',
+            '    return 0;',
+            '}'
+          )
+          minilang.cmd run smoke.mil
+
+  # Archive fallback smoke: force the no-git path (MINILANG_NO_GIT=1), which
+  # downloads codeload tarballs and extracts them instead of cloning.
+  install-archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout compiler (script only)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install GNU toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make g++ clang
+
+      - name: Stage standalone installer
+        run: |
+          mkdir -p "$RUNNER_TEMP/standalone/scripts"
+          cp scripts/install.sh "$RUNNER_TEMP/standalone/scripts/"
+
+      - name: Run installer (archive fallback, skip full suite)
+        env:
+          MINILANG_PREFIX: ${{ github.workspace }}/ml-archive-prefix
+          MINILANG_NO_GIT: '1'
+          SKIP_TESTS: '1'
+        run: bash "$RUNNER_TEMP/standalone/scripts/install.sh"
+
+      - name: Verify installed command
+        env:
+          PREFIX: ${{ github.workspace }}/ml-archive-prefix
+        run: |
+          export PATH="$PREFIX/bin:$PATH"
+          cat > smoke.mil <<'EOF'
+          func main() {
+              println "archive OK";
+              return 0;
+          }
+          EOF
+          minilang run smoke.mil
