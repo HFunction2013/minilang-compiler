@@ -2,8 +2,8 @@
 #
 # Self-hosted minilang toolchain. The handwritten C bootstrap compiler lives in
 # the sibling repository `minilang-boot`; this repo only contains the minilang
-# sources (compiler.mil / vm.mil / llvm_gen.mil / milc_io.mil / main.mil) that
-# the boot binary compiles and runs.
+# sources (compiler.mil / vm.mil / milc_io.mil / main.mil) that the boot binary
+# compiles and runs.
 #
 # Point MINILANG at a boot `minilang` binary (built from minilang-boot), or let
 # the Makefile fall back to ../minilang-boot/minilang then ./minilang.
@@ -40,4 +40,4 @@ bootstrap: check-boot
 	./bootstrap_test.sh
 
 clean:
-	rm -f *.milc *.ll *.o minilang
+	rm -f *.milc *.o minilang

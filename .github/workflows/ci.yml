@@ -9,8 +9,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          # Linux: GNU gcc, GNU C++ driver (g++), and clang.
+          - os: ubuntu-latest
+            cc: gcc
+          - os: ubuntu-latest
+            cc: g++
+          - os: ubuntu-latest
+            cc: clang
+          # macOS: Apple/LLVM clang and Homebrew GCC (versioned alias g++-15).
+          # MSVC/cl is Windows-only and has no macOS build.
+          - os: macos-latest
+            cc: clang
+          - os: macos-latest
+            cc: g++-15
+          # Windows: MSVC cl, the LLVM clang (MSVC ABI target), and MinGW g++.
+          # The g++ job builds the boot host with the MinGW/Ninja toolchain so it
+          # emits a GNU libminilang.dll.a import library for the extension DLL.
+          - os: windows-latest
+            cc: cl
+          - os: windows-latest
+            cc: clang
+          - os: windows-latest
+            cc: g++
     runs-on: ${{ matrix.os }}
+    env:
+      CC: ${{ matrix.cc }}
     steps:
       - name: Checkout compiler
         uses: actions/checkout@v4
@@ -21,35 +45,44 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: HFunction2013/minilang-boot
+          ref: ${{ github.head_ref || github.ref_name }}
           path: minilang-boot
 
-      - name: Install LLVM + build tools (Ubuntu)
+      - name: Install GNU toolchain (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang build-essential make
+          sudo apt-get install -y build-essential make g++ clang
 
-      - name: Install LLVM (macOS)
-        if: runner.os == 'macOS'
+      - name: Set up MSVC environment (Windows, self-contained)
+        if: runner.os == 'Windows'
+        shell: cmd
         run: |
-          brew install llvm
-          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSPATH=%%i"
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set >> "%GITHUB_ENV%"
 
       - name: Build boot compiler (Unix)
         if: runner.os != 'Windows'
         working-directory: minilang-boot
         run: make
 
-      - name: Build boot compiler (Windows, MSVC)
+      - name: Build boot compiler (Windows)
         if: runner.os == 'Windows'
         working-directory: minilang-boot
         shell: bash
-        run: cmake -B build && cmake --build build --config Release
-
-      - name: Add boot binary to PATH (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: echo "${{ github.workspace }}/minilang-boot" >> $GITHUB_PATH
+        run: |
+          BOOT_WS="${{ github.workspace }}/minilang-boot"
+          if [ "$CC" = "g++" ]; then
+            # MinGW host: Ninja + gcc, so the linker emits a GNU import library
+            # (libminilang.dll.a) the MinGW extension DLL can consume.
+            cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc
+            cmake --build build
+            echo "MINILANG_BOOT=$BOOT_WS/build/minilang.exe" >> "$GITHUB_ENV"
+          else
+            cmake -B build && cmake --build build --config Release
+            echo "MINILANG_BOOT=$BOOT_WS/build/Release/minilang.exe" >> "$GITHUB_ENV"
+          fi
 
       - name: Full test suite (Unix)
         if: runner.os != 'Windows'
@@ -58,29 +91,97 @@ jobs:
           MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG: ${{ github.workspace }}/minilang-boot/minilang
           MINILANG_DIR: ${{ github.workspace }}
-          LLVM_DIR: ${{ runner.os == 'macOS' && '/opt/homebrew/opt/llvm' || '' }}
-        run: |
-          set -e
-          bash vm_test.sh
-          bash bootstrap_test.sh
-          bash full_selfhost_test.sh
-          bash ext_test.sh
-          echo "=== every tests/*.mil through the boot VM ==="
-          for f in tests/*.mil; do
-            echo "--- $f ---"
-            minilang run "$f"
-          done
+          CC: ${{ matrix.cc }}
+        run: bash full_test.sh
 
-      - name: VM smoke over tests/*.mil (Windows)
+      - name: Full test suite (Windows)
         if: runner.os == 'Windows'
         shell: bash
         env:
-          MINILANG_BOOT: ${{ github.workspace }}/minilang-boot/build/Release/minilang.exe
+          MINILANG_BOOT: ${{ env.MINILANG_BOOT }}
           MINILANG_DIR: ${{ github.workspace }}
+          CC: ${{ matrix.cc }}
+        run: bash full_test.sh
+
+  # Installer smoke: run scripts/install.sh / install.ps1 end to end (clone
+  # sources, build on site, lay down the prefix, add PATH, run the full suite
+  # inside the installer), then invoke the installed `minilang` from PATH.
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout compiler
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Checkout boot toolchain (sibling, for the test suite's native build)
+        uses: actions/checkout@v4
+        with:
+          repository: HFunction2013/minilang-boot
+          ref: ${{ github.head_ref || github.ref_name }}
+          path: minilang-boot
+
+      - name: Install GNU toolchain (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
-          set -e
-          BIN=minilang-boot/build/Release/minilang.exe
-          for f in tests/*.mil; do
-            echo "--- $f ---"
-            "$BIN" run "$f"
-          done
+          sudo apt-get update
+          sudo apt-get install -y build-essential make g++ clang
+
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSPATH=%%i"
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set >> "%GITHUB_ENV%"
+
+      - name: Run installer (Unix)
+        if: runner.os != 'Windows'
+        env:
+          MINILANG_PREFIX: ${{ github.workspace }}/ml-prefix
+        run: bash scripts/install.sh
+
+      - name: Run installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          MINILANG_PREFIX: ${{ github.workspace }}\ml-prefix
+        run: |
+          .\scripts\install.ps1 -Prefix "$env:MINILANG_PREFIX"
+
+      - name: Verify installed command (Unix)
+        if: runner.os != 'Windows'
+        env:
+          PREFIX: ${{ github.workspace }}/ml-prefix
+        run: |
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+          export PATH="$PREFIX/bin:$PATH"
+          cat > smoke.mil <<'EOF'
+          func main() {
+              println "installed OK";
+              return 0;
+          }
+          EOF
+          minilang run smoke.mil
+
+      - name: Verify installed command (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PREFIX: ${{ github.workspace }}\ml-prefix
+        run: |
+          $env:Path = "$env:PREFIX\bin;$env:Path"
+          Set-Content -Path smoke.mil -Value @(
+            'func main() {',
+            '    println "installed OK";',
+            '    return 0;',
+            '}'
+          )
+          minilang.cmd run smoke.mil

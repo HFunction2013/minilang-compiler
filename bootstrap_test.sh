@@ -3,7 +3,7 @@
 # Requires a boot `minilang` binary (built from minilang-boot) on PATH or in
 # $MINILANG_BOOT / ../minilang-boot/minilang.
 #
-# Stage 1: boot compiles compiler.mil -> native executable A (LLVM)
+# Stage 1: boot compiles compiler.mil -> native executable A (C source, system cc -O2)
 # Stage 2: A compiles compiler.mil -> bytecode text B
 # Stage 3: boot compiles compiler.mil -> bytecode text A'
 # Stage 4: compare A' and B (must be identical)
@@ -21,15 +21,17 @@ echo ""
 
 echo "=== Stage 1: boot compiles compiler.mil -> native executable A ==="
 "$MINILANG" build -e compiler.mil 2>&1
-if [ ! -x ./compiler ]; then
+BIN=./compiler
+[ -x "$BIN" ] || BIN=./compiler.exe
+if [ ! -x "$BIN" ]; then
     echo "ERROR: failed to build compiler executable"
     exit 1
 fi
-echo "A = ./compiler ($(wc -c < compiler) bytes)"
+echo "A = $BIN ($(wc -c < "$BIN") bytes)"
 echo ""
 
 echo "=== Stage 2: A compiles compiler.mil -> bytecode text B ==="
-./compiler dump-text compiler.mil > /tmp/minilang_stage2_b.txt 2>/tmp/minilang_stage2_err.txt
+"$BIN" dump-text compiler.mil > /tmp/minilang_stage2_b.txt 2>/tmp/minilang_stage2_err.txt
 echo "Exit code: $?"
 if [ -s /tmp/minilang_stage2_err.txt ]; then
     echo "Errors:"

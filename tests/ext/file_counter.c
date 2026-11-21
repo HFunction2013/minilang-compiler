@@ -18,14 +18,14 @@
 #include <stdio.h>
 
 /* Open a file and return its FILE* as an opaque handle. */
-Value ml_native_counter_open(Value path) {
+MINI_EXT_API Value ml_native_counter_open(Value path) {
     const char *p = ml_cstr(path);
     FILE *f = fopen(p, "r");
     return ml_opaque_create(f); /* NULL handle is a valid opaque value */
 }
 
 /* Count the lines in the file behind an opaque handle. */
-Value ml_native_counter_lines(Value handle) {
+MINI_EXT_API Value ml_native_counter_lines(Value handle) {
     FILE *f = (FILE *)ml_opaque_ptr(handle);
     if (!f) return ml_mkint(-1);
     long n = 0;
@@ -37,7 +37,7 @@ Value ml_native_counter_lines(Value handle) {
 }
 
 /* Close the file behind an opaque handle. */
-Value ml_native_counter_close(Value handle) {
+MINI_EXT_API Value ml_native_counter_close(Value handle) {
     FILE *f = (FILE *)ml_opaque_ptr(handle);
     if (f) fclose(f);
     return ml_mkint(0);
