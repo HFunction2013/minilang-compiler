@@ -67,17 +67,6 @@ if (-not $DocSource -and (Test-Path (Join-Path $docSibling 'docs'))) {
     $DocSource = (Resolve-Path $docSibling).Path
     Log "Using local document checkout: $DocSource"
 }
-$sysSibling = Join-Path $CompilerSource 'syslib'
-if (-not $SysSource -and (Test-Path (Join-Path $sysSibling 'builtin.mil'))) {
-    $SysSource = $sysSibling
-} else {
-    $sysRepoSibling = Join-Path $CompilerSource '..\minilang-syslib'
-    if (-not $SysSource -and (Test-Path (Join-Path $sysRepoSibling 'builtin.mil'))) {
-        $SysSource = (Resolve-Path $sysRepoSibling).Path
-        Log "Using local syslib checkout: $SysSource"
-    }
-}
-
 function Get-Slug($Url) {
     $u = $Url -replace '^https?://', ''
     $u = $u -replace '^git@', ''
@@ -87,7 +76,10 @@ function Get-Slug($Url) {
 }
 
 function Fetch-Repo($RepoUrl, $Name) {
-    if (-not $Work) { $script:Work = Join-Path $env:TEMP ("minilang-{0}" -f ([guid]::NewGuid().ToString('N').Substring(0,8))) }
+    if (-not $Work) {
+        $script:Work = Join-Path $env:TEMP ("minilang-{0}" -f ([guid]::NewGuid().ToString('N').Substring(0,8)))
+        New-Item -ItemType Directory -Force -Path $Work | Out-Null
+    }
     $dir = Join-Path $Work $Name
     if (Test-Path $dir) { return $dir }
     $useGit = $true
@@ -117,6 +109,21 @@ function Fetch-Repo($RepoUrl, $Name) {
 if (-not $CompilerSource) { $CompilerSource = Fetch-Repo $CompilerRepo 'compiler' }
 if (-not $BootSource)    { $BootSource    = Fetch-Repo $BootRepo    'boot' }
 if (-not $DocSource)      { $DocSource     = Fetch-Repo $DocRepo     'document' }
+
+# Local syslib sibling: the compiler tree's own syslib submodule, else the
+# sibling minilang-syslib checkout. Resolved after the compiler source exists.
+if (-not $SysSource) {
+    $sysSibling = Join-Path $CompilerSource 'syslib'
+    if (Test-Path (Join-Path $sysSibling 'builtin.mil')) {
+        $SysSource = $sysSibling
+    } else {
+        $sysRepoSibling = Join-Path $CompilerSource '..\minilang-syslib'
+        if (Test-Path (Join-Path $sysRepoSibling 'builtin.mil')) {
+            $SysSource = (Resolve-Path $sysRepoSibling).Path
+            Log "Using local syslib checkout: $SysSource"
+        }
+    }
+}
 if (-not $SysSource)      { $SysSource     = Fetch-Repo $SysRepo     'syslib' }
 
 if (-not (Test-Path (Join-Path $BootSource 'main.c')))      { Die "boot source not found ($BootSource)" }
