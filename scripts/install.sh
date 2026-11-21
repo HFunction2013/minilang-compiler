@@ -66,7 +66,11 @@ done
 [ -n "$PREFIX" ] || die "empty prefix"
 
 WORK=""
-cleanup() { [ -n "$WORK" ] && [ -d "$WORK" ] && [ "${KEEP_WORK:-0}" != "1" ] && rm -rf "$WORK"; }
+cleanup() {
+    if [ -n "$WORK" ] && [ -d "$WORK" ] && [ "${KEEP_WORK:-0}" != "1" ]; then
+        rm -rf "$WORK"
+    fi
+}
 trap cleanup EXIT
 
 clone() { # $1 repo url, $2 dirname, $3 out-var

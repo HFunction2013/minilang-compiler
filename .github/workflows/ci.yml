@@ -120,6 +120,13 @@ jobs:
         with:
           submodules: true
 
+      - name: Checkout boot toolchain (sibling, for the test suite's native build)
+        uses: actions/checkout@v4
+        with:
+          repository: HFunction2013/minilang-boot
+          ref: ${{ github.head_ref || github.ref_name }}
+          path: minilang-boot
+
       - name: Install GNU toolchain (Ubuntu)
         if: runner.os == 'Linux'
         run: |
