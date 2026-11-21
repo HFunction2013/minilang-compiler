@@ -102,3 +102,77 @@ jobs:
           MINILANG_DIR: ${{ github.workspace }}
           CC: ${{ matrix.cc }}
         run: bash full_test.sh
+
+  # Installer smoke: run scripts/install.sh / install.ps1 end to end (clone
+  # sources, build on site, lay down the prefix, add PATH, run the full suite
+  # inside the installer), then invoke the installed `minilang` from PATH.
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout compiler
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install GNU toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make g++ clang
+
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSPATH=%%i"
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set >> "%GITHUB_ENV%"
+
+      - name: Run installer (Unix)
+        if: runner.os != 'Windows'
+        env:
+          MINILANG_PREFIX: ${{ github.workspace }}/ml-prefix
+        run: bash scripts/install.sh
+
+      - name: Run installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          MINILANG_PREFIX: ${{ github.workspace }}\ml-prefix
+        run: |
+          .\scripts\install.ps1 -Prefix "$env:MINILANG_PREFIX"
+
+      - name: Verify installed command (Unix)
+        if: runner.os != 'Windows'
+        env:
+          PREFIX: ${{ github.workspace }}/ml-prefix
+        run: |
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+          cat > smoke.mil <<'EOF'
+          func main() {
+              println "installed OK";
+              return 0;
+          }
+          EOF
+          minilang run smoke.mil
+
+      - name: Verify installed command (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PREFIX: ${{ github.workspace }}\ml-prefix
+        run: |
+          $env:Path = "$env:PREFIX\bin;$env:Path"
+          Set-Content -Path smoke.mil -Value @(
+            'func main() {',
+            '    println "installed OK";',
+            '    return 0;',
+            '}'
+          )
+          minilang.cmd run smoke.mil

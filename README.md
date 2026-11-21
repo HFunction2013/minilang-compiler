@@ -29,6 +29,26 @@
 - **REPL**：交互式命令行，支持多行输入、表达式求值、跨行保留函数/变量/模块
 - **.milc 字节码文件**：可编译为二进制字节码文件，随时加载运行；mil 侧直接读写二进制，无需任何外部脚本
 
+## 安装
+
+一键脚本会拉取源码、现场编译、安装到用户前缀并把 `bin` 加入 `PATH`，
+最后跑完整测试；标准库与文档一并安装到前缀目录。
+
+Unix（Linux / macOS）：
+
+```bash
+bash scripts/install.sh        # 默认前缀 ~/.local，可用 MINILANG_PREFIX 覆盖
+```
+
+Windows（PowerShell）：
+
+```powershell
+.\scripts\install.ps1          # 默认前缀 %LOCALAPPDATA%\Programs\minilang
+```
+
+安装布局：`bin/minilang`（PATH 上的包装命令）、`lib/minilang/`（boot 二进制、
+运行时 C 源/头、自举 `.mil` 源码、`syslib/`）、`share/doc/minilang/docs/`（文档）。
+
 ## 构建
 
 本仓库不再包含 C 源码。先构建 boot 引导编译器：
