@@ -23,7 +23,7 @@
 #   -BootSource   reuse a boot source tree
 #   -DocSource    reuse a document source tree
 #   -SysSource    reuse a syslib source tree
-#   -Branch       branch/tag to clone (default experiment/asm-gen)
+#   -Branch       branch/tag to clone (default main; empty = remote HEAD)
 #   -SkipTests    do not run the full test suite after install
 #   -KeepWork     keep the temporary build tree for inspection
 
@@ -34,7 +34,7 @@ param(
     [string]$BootSource = $(if ($env:BOOT_SOURCE) { $env:BOOT_SOURCE } else { '' }),
     [string]$DocSource = $(if ($env:DOC_SOURCE) { $env:DOC_SOURCE } else { '' }),
     [string]$SysSource = $(if ($env:SYS_SOURCE) { $env:SYS_SOURCE } else { '' }),
-    [string]$Branch = $(if ($env:MINILANG_BRANCH) { $env:MINILANG_BRANCH } else { 'experiment/asm-gen' }),
+    [string]$Branch = $(if ($env:MINILANG_BRANCH) { $env:MINILANG_BRANCH } else { 'main' }),
     [string]$CompilerRepo = $(if ($env:MINILANG_REPO) { $env:MINILANG_REPO } else { 'https://github.com/HFunction2013/minilang-compiler.git' }),
     [string]$BootRepo = $(if ($env:MINILANG_BOOT_REPO) { $env:MINILANG_BOOT_REPO } else { 'https://github.com/HFunction2013/minilang-boot.git' }),
     [string]$DocRepo = $(if ($env:MINILANG_DOC_REPO) { $env:MINILANG_DOC_REPO } else { 'https://github.com/HFunction2013/minilang-document.git' }),
@@ -81,8 +81,11 @@ function Clone-Repo($Url, $Name) {
     if (-not $Work) { $script:Work = Join-Path $env:TEMP ("minilang-{0}" -f ([guid]::NewGuid().ToString('N').Substring(0,8))) }
     $dir = Join-Path $Work $Name
     if (-not (Test-Path $dir)) {
-        Log "Cloning $Url ($Branch)"
-        git clone --depth 1 --branch $Branch $Url $dir | Out-Host
+        $cloneArgs = @('clone', '--depth', '1')
+        if ($Branch) { $cloneArgs += @('--branch', $Branch); Log "Cloning $Url ($Branch)" }
+        else { Log "Cloning $Url (remote HEAD)" }
+        $cloneArgs += @($Url, $dir)
+        git @cloneArgs | Out-Host
     }
     return $dir
 }
