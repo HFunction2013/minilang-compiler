@@ -148,7 +148,7 @@ if [ -z "$WORK" ] && { [ -z "$COMPILER_SOURCE" ] || [ -z "$BOOT_SOURCE" ] || [ -
     WORK="$(mktemp -d)"
 fi
 [ -z "$COMPILER_SOURCE" ] && fetch_repo "$COMPILER_REPO" compiler COMPILER_SOURCE
-[ -z "$BOOT_SOURCE" ]    && fetch_repo "$BOOT_REPO"    boot    BOOT_SOURCE
+[ -z "$BOOT_SOURCE" ]    && fetch_repo "$BOOT_REPO"    minilang-boot    BOOT_SOURCE
 [ -z "$DOC_SOURCE" ]     && fetch_repo "$DOC_REPO"     document DOC_SOURCE
 [ -z "$SYS_SOURCE" ]     && fetch_repo "$SYS_REPO"     syslib  SYS_SOURCE
 

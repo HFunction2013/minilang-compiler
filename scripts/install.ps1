@@ -107,7 +107,7 @@ function Fetch-Repo($RepoUrl, $Name) {
 }
 
 if (-not $CompilerSource) { $CompilerSource = Fetch-Repo $CompilerRepo 'compiler' }
-if (-not $BootSource)    { $BootSource    = Fetch-Repo $BootRepo    'boot' }
+if (-not $BootSource)    { $BootSource    = Fetch-Repo $BootRepo    'minilang-boot' }
 if (-not $DocSource)      { $DocSource     = Fetch-Repo $DocRepo     'document' }
 
 # Local syslib sibling: the compiler tree's own syslib submodule, else the
