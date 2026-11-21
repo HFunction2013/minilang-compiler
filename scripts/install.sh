@@ -24,7 +24,7 @@
 #   MINILANG_BOOT_REPO boot git URL
 #   MINILANG_DOC_REPO document git URL
 #   MINILANG_SYS_REPO syslib git URL
-#   MINILANG_BRANCH   branch/tag to clone (default experiment/asm-gen)
+#   MINILANG_BRANCH   branch/tag to clone (default main; empty = remote HEAD)
 #   COMPILER_SOURCE / BOOT_SOURCE / DOC_SOURCE / SYS_SOURCE reuse local trees
 #   SKIP_TESTS=1      do not run the full test suite after install
 #   KEEP_WORK=1       keep the temporary build tree for inspection
@@ -34,7 +34,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PREFIX="${MINILANG_PREFIX:-$HOME/.local}"
-BRANCH="${MINILANG_BRANCH:-experiment/asm-gen}"
+BRANCH="${MINILANG_BRANCH:-main}"
 COMPILER_REPO="${MINILANG_REPO:-https://github.com/HFunction2013/minilang-compiler.git}"
 BOOT_REPO="${MINILANG_BOOT_REPO:-https://github.com/HFunction2013/minilang-boot.git}"
 DOC_REPO="${MINILANG_DOC_REPO:-https://github.com/HFunction2013/minilang-document.git}"
@@ -76,8 +76,13 @@ trap cleanup EXIT
 clone() { # $1 repo url, $2 dirname, $3 out-var
     url="$1"; dir="$2"
     if [ ! -d "$WORK/$dir" ]; then
-        log "Cloning $url ($BRANCH)"
-        git clone --depth 1 --branch "$BRANCH" "$url" "$WORK/$dir"
+        if [ -n "$BRANCH" ]; then
+            log "Cloning $url ($BRANCH)"
+            git clone --depth 1 --branch "$BRANCH" "$url" "$WORK/$dir"
+        else
+            log "Cloning $url (remote HEAD)"
+            git clone --depth 1 "$url" "$WORK/$dir"
+        fi
     fi
     eval "$3=\$WORK/$dir"
 }
