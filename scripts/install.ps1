@@ -23,7 +23,8 @@
 #   -BootSource   reuse a boot source tree
 #   -DocSource    reuse a document source tree
 #   -SysSource    reuse a syslib source tree
-#   -Branch       branch/tag to clone (default main; empty = remote HEAD)
+#   -Branch       branch/tag to fetch (default main; empty = remote HEAD via git)
+#   MINILANG_NO_GIT=1  skip git and download the source archive (zip) instead
 #   -SkipTests    do not run the full test suite after install
 #   -KeepWork     keep the temporary build tree for inspection
 
@@ -77,23 +78,46 @@ if (-not $SysSource -and (Test-Path (Join-Path $sysSibling 'builtin.mil'))) {
     }
 }
 
-function Clone-Repo($Url, $Name) {
+function Get-Slug($Url) {
+    $u = $Url -replace '^https?://', ''
+    $u = $u -replace '^git@', ''
+    $u = $u -replace '^github.com[:/]', ''
+    $u = $u -replace '\.git$', ''
+    return $u.TrimEnd('/')
+}
+
+function Fetch-Repo($RepoUrl, $Name) {
     if (-not $Work) { $script:Work = Join-Path $env:TEMP ("minilang-{0}" -f ([guid]::NewGuid().ToString('N').Substring(0,8))) }
     $dir = Join-Path $Work $Name
-    if (-not (Test-Path $dir)) {
+    if (Test-Path $dir) { return $dir }
+    $useGit = $true
+    if ($env:MINILANG_NO_GIT -eq '1') { $useGit = $false }
+    if ($useGit -and (Get-Command git -ErrorAction SilentlyContinue)) {
         $cloneArgs = @('clone', '--depth', '1')
-        if ($Branch) { $cloneArgs += @('--branch', $Branch); Log "Cloning $Url ($Branch)" }
-        else { Log "Cloning $Url (remote HEAD)" }
-        $cloneArgs += @($Url, $dir)
+        if ($Branch) { $cloneArgs += @('--branch', $Branch); Log "Cloning $RepoUrl ($Branch)" }
+        else { Log "Cloning $RepoUrl (remote HEAD)" }
+        $cloneArgs += @($RepoUrl, $dir)
         git @cloneArgs | Out-Host
+    } else {
+        if (-not $Branch) { Die 'git unavailable: set -Branch / MINILANG_BRANCH to download an archive' }
+        $slug = Get-Slug $RepoUrl
+        $zip = Join-Path $Work "$Name.zip"
+        Log "Downloading archive $slug @ $Branch (no git)"
+        Invoke-WebRequest -Uri "https://codeload.github.com/$slug/zip/refs/heads/$Branch" -OutFile $zip
+        $extract = Join-Path $Work "$Name-extract"
+        Expand-Archive -Path $zip -DestinationPath $extract -Force
+        $nested = Get-ChildItem $extract -Directory | Select-Object -First 1
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        Move-Item (Join-Path $nested.FullName '*') $dir -Force
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
     }
     return $dir
 }
 
-if (-not $CompilerSource) { $CompilerSource = Clone-Repo $CompilerRepo 'compiler' }
-if (-not $BootSource)    { $BootSource    = Clone-Repo $BootRepo    'boot' }
-if (-not $DocSource)      { $DocSource     = Clone-Repo $DocRepo     'document' }
-if (-not $SysSource)      { $SysSource     = Clone-Repo $SysRepo     'syslib' }
+if (-not $CompilerSource) { $CompilerSource = Fetch-Repo $CompilerRepo 'compiler' }
+if (-not $BootSource)    { $BootSource    = Fetch-Repo $BootRepo    'boot' }
+if (-not $DocSource)      { $DocSource     = Fetch-Repo $DocRepo     'document' }
+if (-not $SysSource)      { $SysSource     = Fetch-Repo $SysRepo     'syslib' }
 
 if (-not (Test-Path (Join-Path $BootSource 'main.c')))      { Die "boot source not found ($BootSource)" }
 if (-not (Test-Path (Join-Path $CompilerSource 'main.mil'))){ Die "compiler source not found ($CompilerSource)" }

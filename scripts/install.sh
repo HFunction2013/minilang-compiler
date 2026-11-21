@@ -24,7 +24,8 @@
 #   MINILANG_BOOT_REPO boot git URL
 #   MINILANG_DOC_REPO document git URL
 #   MINILANG_SYS_REPO syslib git URL
-#   MINILANG_BRANCH   branch/tag to clone (default main; empty = remote HEAD)
+#   MINILANG_BRANCH   branch/tag to fetch (default main; empty = remote HEAD via git)
+#   MINILANG_NO_GIT=1 skip git and download the source archive (tarball) instead
 #   COMPILER_SOURCE / BOOT_SOURCE / DOC_SOURCE / SYS_SOURCE reuse local trees
 #   SKIP_TESTS=1      do not run the full test suite after install
 #   KEEP_WORK=1       keep the temporary build tree for inspection
@@ -73,18 +74,54 @@ cleanup() {
 }
 trap cleanup EXIT
 
-clone() { # $1 repo url, $2 dirname, $3 out-var
+slug_of() { # $1 repo url -> owner/repo (no scheme, host, .git)
+    u="$1"
+    u="${u#*://}"
+    u="${u#git@}"
+    u="${u#github.com/}"
+    u="${u#github.com:}"
+    u="${u%.git}"
+    u="${u%/}"
+    echo "$u"
+}
+
+http_download() { # $1 out-file, $2 url
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$2" -o "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$1" "$2"
+    else
+        die "no curl/wget available to download the source archive"
+    fi
+}
+
+fetch_repo() { # $1 repo url, $2 dirname, $3 out-var
     url="$1"; dir="$2"
-    if [ ! -d "$WORK/$dir" ]; then
+    target="$WORK/$dir"
+    if [ -d "$target" ]; then
+        eval "$3=\$target"; return
+    fi
+    use_git=1
+    [ "${MINILANG_NO_GIT:-0}" = "1" ] && use_git=0
+    if [ "$use_git" = "1" ] && command -v git >/dev/null 2>&1; then
         if [ -n "$BRANCH" ]; then
             log "Cloning $url ($BRANCH)"
-            git clone --depth 1 --branch "$BRANCH" "$url" "$WORK/$dir"
+            git clone --depth 1 --branch "$BRANCH" "$url" "$target"
         else
             log "Cloning $url (remote HEAD)"
-            git clone --depth 1 "$url" "$WORK/$dir"
+            git clone --depth 1 "$url" "$target"
         fi
+    else
+        [ -n "$BRANCH" ] || die "git unavailable: set MINILANG_BRANCH to download an archive"
+        slug="$(slug_of "$url")"
+        archive="$WORK/$dir.tar.gz"
+        log "Downloading archive $slug @ $BRANCH (no git)"
+        http_download "$archive" "https://codeload.github.com/$slug/tar.gz/refs/heads/$BRANCH"
+        mkdir -p "$target"
+        tar -xzf "$archive" -C "$target" --strip-components=1
+        rm -f "$archive"
     fi
-    eval "$3=\$WORK/$dir"
+    eval "$3=\$target"
 }
 
 # ---- 1. Resolve sources: local siblings first, otherwise clone into WORK ----
@@ -110,10 +147,10 @@ fi
 if [ -z "$WORK" ] && { [ -z "$COMPILER_SOURCE" ] || [ -z "$BOOT_SOURCE" ] || [ -z "$DOC_SOURCE" ] || [ -z "$SYS_SOURCE" ]; }; then
     WORK="$(mktemp -d)"
 fi
-[ -z "$COMPILER_SOURCE" ] && clone "$COMPILER_REPO" compiler COMPILER_SOURCE
-[ -z "$BOOT_SOURCE" ]    && clone "$BOOT_REPO"    boot    BOOT_SOURCE
-[ -z "$DOC_SOURCE" ]     && clone "$DOC_REPO"     document DOC_SOURCE
-[ -z "$SYS_SOURCE" ]     && clone "$SYS_REPO"     syslib  SYS_SOURCE
+[ -z "$COMPILER_SOURCE" ] && fetch_repo "$COMPILER_REPO" compiler COMPILER_SOURCE
+[ -z "$BOOT_SOURCE" ]    && fetch_repo "$BOOT_REPO"    boot    BOOT_SOURCE
+[ -z "$DOC_SOURCE" ]     && fetch_repo "$DOC_REPO"     document DOC_SOURCE
+[ -z "$SYS_SOURCE" ]     && fetch_repo "$SYS_REPO"     syslib  SYS_SOURCE
 
 [ -f "$BOOT_SOURCE/main.c" ]     || die "boot source not found ($BOOT_SOURCE)"
 [ -f "$COMPILER_SOURCE/main.mil" ]|| die "compiler source not found ($COMPILER_SOURCE)"
